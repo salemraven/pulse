@@ -6,6 +6,22 @@ import type { Analysis } from "@/lib/audio/types";
 const MODEL_URL = "/models/kachujin.glb";
 const PACK_URL = "/models/dances.glb";
 
+export type DancerStatus = "loading" | "ready" | "error";
+
+const attached = new WeakMap<HTMLCanvasElement, DancerScene>();
+
+export function attachDancer(canvas: HTMLCanvasElement, onStatus?: (status: DancerStatus, detail?: string) => void) {
+  const existing = attached.get(canvas);
+  if (existing) {
+    existing.setStatusHandler(onStatus);
+    existing.ensureLoaded();
+    return existing;
+  }
+  const scene = new DancerScene(canvas, onStatus);
+  attached.set(canvas, scene);
+  return scene;
+}
+
 function hueColor(hue: number, s = 0.75, l = 0.55) {
   const c = new THREE.Color();
   c.setHSL((((hue % 360) + 360) % 360) / 360, s, l);
@@ -64,10 +80,17 @@ export class DancerScene {
   private headerPx = 96;
   private footerPx = 200;
   private model: THREE.Object3D | null = null;
+  private onStatus: ((status: DancerStatus, detail?: string) => void) | undefined;
+  status: DancerStatus = "loading";
+  detail = "Loading Kachujin…";
   enabled = true;
   ready = false;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(
+    private canvas: HTMLCanvasElement,
+    onStatus?: (status: DancerStatus, detail?: string) => void,
+  ) {
+    this.onStatus = onStatus;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
@@ -82,8 +105,28 @@ export class DancerScene {
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environmentIntensity = 1.1;
     this.scene.add(this.hemi, this.fill, this.key, this.rim, this.root);
+    this.report("loading", "Loading Kachujin…");
     this.fitCamera();
     void this.load();
+  }
+
+  setStatusHandler(onStatus?: (status: DancerStatus, detail?: string) => void) {
+    this.onStatus = onStatus;
+    onStatus?.(this.status, this.detail);
+  }
+
+  private report(status: DancerStatus, detail: string) {
+    this.status = status;
+    this.detail = detail;
+    this.onStatus?.(status, detail);
+  }
+
+  ensureLoaded() {
+    if (this.ready) {
+      this.report("ready", "Kachujin ready");
+      return;
+    }
+    if (!this.loading) void this.load();
   }
 
   resize() {
@@ -136,15 +179,28 @@ export class DancerScene {
     if (this.ready || this.loading) return;
     const id = ++this.loadId;
     this.loading = true;
+    this.report("loading", "Loading Kachujin…");
     try {
       const [gltf, pack] = await Promise.all([this.loader.loadAsync(MODEL_URL), loadPack(this.loader)]);
       if (id !== this.loadId) return;
       this.mount(gltf, pack);
+      this.report("ready", "Kachujin ready");
     } catch (err) {
       console.error("Dancer failed to load", err);
+      if (id === this.loadId) {
+        this.ready = false;
+        this.report("error", "Kachujin did not load. Check /models/kachujin.glb.");
+      }
     } finally {
       if (id === this.loadId) this.loading = false;
     }
+  }
+
+  retry() {
+    this.ready = false;
+    this.loading = false;
+    this.loadId += 1;
+    void this.load();
   }
 
   private mount(gltf: Awaited<ReturnType<GLTFLoader["loadAsync"]>>, pack: THREE.AnimationClip[]) {
@@ -173,6 +229,12 @@ export class DancerScene {
     model.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
+    if (size.y < 0.2) {
+      throw new Error(`Model too small to frame (${size.y.toFixed(3)}m).`);
+    }
+    if (size.y < size.z * 0.55) {
+      throw new Error("Model is sideways or top-down. Rejected.");
+    }
     model.scale.multiplyScalar(1.42 / Math.max(size.y, 0.01));
     model.updateMatrixWorld(true);
     box.setFromObject(model);
