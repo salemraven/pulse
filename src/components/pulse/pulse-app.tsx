@@ -13,9 +13,10 @@ import {
 import { getEngine } from "@/lib/audio/engine";
 import { readId3 } from "@/lib/audio/id3";
 import { searchTracks } from "@/lib/audio/search";
-import type { Track, VizMode } from "@/lib/audio/types";
-import { VIZ_MODES } from "@/lib/audio/types";
+import type { CoreStyle, Track, VizMode } from "@/lib/audio/types";
+import { CORE_STYLES, VIZ_MODES } from "@/lib/audio/types";
 import { VisualizerRenderer } from "@/lib/visualizer/renderer";
+import { DancerScene } from "@/lib/dancer/kachujin-scene";
 import { usePulse } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,12 +36,16 @@ function isAudioFile(file: File) {
 
 export function PulseApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dancerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seekRef = useRef<HTMLDivElement>(null);
   const seekFillRef = useRef<HTMLDivElement>(null);
   const timeLabelRef = useRef<HTMLSpanElement>(null);
   const engineRef = useRef<ReturnType<typeof getEngine> | null>(null);
   const vizRef = useRef<VisualizerRenderer | null>(null);
+  const dancerRef = useRef<DancerScene | null>(null);
   const idleTimer = useRef<number | null>(null);
   const searchTimer = useRef<number | null>(null);
   const [duration, setDuration] = useState(0);
@@ -51,6 +56,7 @@ export function PulseApp() {
   const volume = usePulse((s) => s.volume);
   const muted = usePulse((s) => s.muted);
   const mode = usePulse((s) => s.mode);
+  const core = usePulse((s) => s.core);
   const error = usePulse((s) => s.error);
   const dragging = usePulse((s) => s.dragging);
   const searching = usePulse((s) => s.searching);
@@ -67,11 +73,26 @@ export function PulseApp() {
     }, 2800);
   }, []);
 
+  const syncDancerChrome = useCallback(() => {
+    const dancer = dancerRef.current;
+    const canvas = dancerCanvasRef.current;
+    if (!dancer || !canvas) return;
+    const h = canvas.clientHeight || window.innerHeight;
+    const header = headerRef.current?.getBoundingClientRect().height ?? 96;
+    const measured = footerRef.current?.getBoundingClientRect().height ?? 0;
+    const footer = measured > 40 ? measured : h * 0.32;
+    dancer.setChrome(header, footer);
+  }, []);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem("pulse.mode") as VizMode | null;
       if (saved && VIZ_MODES.some((m) => m.id === saved)) {
         usePulse.setState({ mode: saved });
+      }
+      const savedCore = localStorage.getItem("pulse.core") as CoreStyle | null;
+      if (savedCore && CORE_STYLES.some((c) => c.id === savedCore)) {
+        usePulse.setState({ core: savedCore });
       }
     } catch {
       /* ignore */
@@ -85,10 +106,25 @@ export function PulseApp() {
     engineRef.current = engine;
     const viz = new VisualizerRenderer(canvas);
     viz.mode = usePulse.getState().mode;
+    viz.hideCenter = usePulse.getState().core === "dancer";
     vizRef.current = viz;
     viz.resize();
 
-    const onResize = () => viz.resize();
+    const dancerCanvas = dancerCanvasRef.current;
+    if (dancerCanvas) {
+      const dancer = new DancerScene(dancerCanvas);
+      dancer.enabled = usePulse.getState().core === "dancer";
+      dancerRef.current = dancer;
+      dancer.resize();
+      const h = dancerCanvas.clientHeight || window.innerHeight;
+      dancer.setChrome(96, h * 0.32);
+    }
+
+    const onResize = () => {
+      viz.resize();
+      dancerRef.current?.resize();
+      syncDancerChrome();
+    };
     window.addEventListener("resize", onResize);
 
     const onVis = () => {
@@ -115,6 +151,7 @@ export function PulseApp() {
       last = now;
       const sample = engine.sample();
       viz.frame(dt, sample.analysis, sample.freq, sample.wave, engine.isPlaying());
+      dancerRef.current?.frame(dt, sample.analysis, engine.isPlaying());
       const t = engine.getCurrentTime();
       const d = engine.getDuration();
       if (seekFillRef.current && Number.isFinite(d) && d > 0) {
@@ -127,6 +164,8 @@ export function PulseApp() {
 
     return () => {
       cancelAnimationFrame(raf);
+      dancerRef.current?.dispose();
+      dancerRef.current = null;
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVis);
       audio.removeEventListener("play", syncPlay);
@@ -140,6 +179,21 @@ export function PulseApp() {
   useEffect(() => {
     if (vizRef.current) vizRef.current.mode = mode;
   }, [mode]);
+
+  useEffect(() => {
+    if (vizRef.current) vizRef.current.hideCenter = core === "dancer";
+    const dancer = dancerRef.current;
+    if (!dancer) return;
+    dancer.enabled = core === "dancer";
+    if (core === "dancer") {
+      dancer.resize();
+      syncDancerChrome();
+    }
+  }, [core]);
+
+  useEffect(() => {
+    syncDancerChrome();
+  }, [track, chrome, syncDancerChrome]);
 
   useEffect(() => {
     if (vizRef.current && track) vizRef.current.setTrack(track.title, track.artist);
@@ -346,6 +400,14 @@ export function PulseApp() {
       onPointerDown={bumpChrome}
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
+      <canvas
+        ref={dancerCanvasRef}
+        className={cn(
+          "pointer-events-none absolute inset-0 z-[2] h-full w-full",
+          core === "dancer" ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden="true"
+      />
 
       <div
         className={cn(
@@ -355,6 +417,7 @@ export function PulseApp() {
       />
 
       <header
+        ref={headerRef}
         className={cn(
           "absolute inset-x-0 top-0 z-10 flex flex-col items-stretch gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 sm:flex-row sm:items-start sm:justify-between sm:px-6",
           "transition-[opacity,transform] duration-200 ease-smooth-out",
@@ -420,8 +483,8 @@ export function PulseApp() {
       </header>
 
       {showLanding ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center px-5">
-          <div className="flex w-full max-w-lg flex-col items-center text-center">
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-center px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="flex w-full max-w-lg flex-col items-center pb-2 text-center">
             <p className="font-display text-3xl leading-tight font-semibold tracking-tight text-fg sm:text-4xl">
               Drop a track. Watch the room move.
             </p>
@@ -449,6 +512,7 @@ export function PulseApp() {
 
       {!showLanding ? (
       <footer
+        ref={footerRef}
         className={cn(
           "absolute inset-x-0 bottom-0 z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6",
           "transition-[opacity,transform] duration-200 ease-smooth-out",
@@ -519,7 +583,8 @@ export function PulseApp() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
               {VIZ_MODES.map((m) => (
                 <button
                   key={m.id}
@@ -534,6 +599,22 @@ export function PulseApp() {
                 </button>
               ))}
             </div>
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+              {CORE_STYLES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => usePulse.getState().set({ core: c.id })}
+                  className={cn(
+                    "h-9 shrink-0 rounded-full px-3 text-xs font-medium transition-colors duration-150",
+                    core === c.id ? "bg-accent text-accent-fg" : "text-muted hover:bg-surface-2 hover:text-fg",
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
             <div className="flex items-center gap-1">
               <Button variant="ghost" size="icon-sm" onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>
                 {muted || volume === 0 ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}

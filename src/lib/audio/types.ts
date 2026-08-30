@@ -9,6 +9,13 @@ export const VIZ_MODES: { id: VizMode; label: string }[] = [
   { id: "wave", label: "Wave" },
 ];
 
+export type CoreStyle = "ring" | "dancer";
+
+export const CORE_STYLES: { id: CoreStyle; label: string }[] = [
+  { id: "ring", label: "Ring" },
+  { id: "dancer", label: "Kachujin" },
+];
+
 export type TrackSource = "file" | "search" | "demo";
 
 export type Track = {

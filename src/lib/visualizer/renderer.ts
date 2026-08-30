@@ -49,6 +49,7 @@ export class VisualizerRenderer {
   private artist = "";
   private reduced = false;
   mode: VizMode = "auto";
+  hideCenter = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -117,7 +118,7 @@ export class VisualizerRenderer {
     if (mode === "storm" || this.mode === "auto") this.drawStorm(a);
     if (mode !== "wave") this.drawOrbital(a);
     this.stepParticles(dt, a);
-    this.drawCenter(a);
+    if (!this.hideCenter) this.drawCenter(a);
     this.drawTitle(a);
     this.drawVignette();
     if (this.flash > 0.02) {
