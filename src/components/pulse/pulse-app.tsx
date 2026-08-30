@@ -16,7 +16,7 @@ import { searchTracks } from "@/lib/audio/search";
 import type { CoreStyle, Track, VizMode } from "@/lib/audio/types";
 import { CORE_STYLES, VIZ_MODES } from "@/lib/audio/types";
 import { VisualizerRenderer } from "@/lib/visualizer/renderer";
-import { DancerScene } from "@/lib/dancer/kachujin-scene";
+import { attachDancer, type DancerStatus } from "@/lib/dancer/kachujin-scene";
 import { usePulse } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,11 +45,13 @@ export function PulseApp() {
   const timeLabelRef = useRef<HTMLSpanElement>(null);
   const engineRef = useRef<ReturnType<typeof getEngine> | null>(null);
   const vizRef = useRef<VisualizerRenderer | null>(null);
-  const dancerRef = useRef<DancerScene | null>(null);
+  const dancerRef = useRef<ReturnType<typeof attachDancer> | null>(null);
   const idleTimer = useRef<number | null>(null);
   const searchTimer = useRef<number | null>(null);
   const [duration, setDuration] = useState(0);
   const [focused, setFocused] = useState(false);
+  const [dancerStatus, setDancerStatus] = useState<DancerStatus>("loading");
+  const [dancerDetail, setDancerDetail] = useState("Loading Kachujin…");
 
   const track = usePulse((s) => s.track);
   const playing = usePulse((s) => s.playing);
@@ -112,7 +114,13 @@ export function PulseApp() {
 
     const dancerCanvas = dancerCanvasRef.current;
     if (dancerCanvas) {
-      const dancer = new DancerScene(dancerCanvas);
+      const dancer = attachDancer(dancerCanvas, (status, detail) => {
+        setDancerStatus(status);
+        if (detail) setDancerDetail(detail);
+        if (status === "error") {
+          usePulse.getState().set({ error: detail ?? "Kachujin did not load." });
+        }
+      });
       dancer.enabled = usePulse.getState().core === "dancer";
       dancerRef.current = dancer;
       dancer.resize();
@@ -164,8 +172,6 @@ export function PulseApp() {
 
     return () => {
       cancelAnimationFrame(raf);
-      dancerRef.current?.dispose();
-      dancerRef.current = null;
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVis);
       audio.removeEventListener("play", syncPlay);
@@ -186,6 +192,7 @@ export function PulseApp() {
     if (!dancer) return;
     dancer.enabled = core === "dancer";
     if (core === "dancer") {
+      dancer.ensureLoaded();
       dancer.resize();
       syncDancerChrome();
     }
@@ -392,6 +399,7 @@ export function PulseApp() {
 
   const showLanding = !track;
   const canSeek = track?.source !== "demo" && duration > 0 && Number.isFinite(duration);
+  const showDancerHud = core === "dancer" && dancerStatus !== "ready";
 
   return (
     <div
@@ -408,6 +416,27 @@ export function PulseApp() {
         )}
         aria-hidden="true"
       />
+
+      {showDancerHud ? (
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 z-[3] flex -translate-y-1/2 flex-col items-center px-6 text-center">
+          {dancerStatus === "loading" ? (
+            <p className="rounded-lg bg-surface/80 px-3 py-2 text-sm text-muted backdrop-blur-sm">
+              Loading Kachujin…
+            </p>
+          ) : (
+            <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-lg bg-surface/90 px-4 py-3 backdrop-blur-sm">
+              <p className="text-sm text-fg">{dancerDetail}</p>
+              <Button
+                variant="outline"
+                className="h-9"
+                onClick={() => dancerRef.current?.retry()}
+              >
+                Retry dancer
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div
         className={cn(
