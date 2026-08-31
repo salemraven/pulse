@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CoreStyle, SearchHit, Track, VizMode } from "@/lib/audio/types";
+import type { CoreStyle, Track, VizMode } from "@/lib/audio/types";
 
 type PulseState = {
   track: Track | null;
@@ -10,10 +10,9 @@ type PulseState = {
   core: CoreStyle;
   error: string | null;
   dragging: boolean;
-  searching: boolean;
-  hits: SearchHit[];
-  query: string;
   chrome: boolean;
+  mapping: boolean;
+  mapLabel: string;
   set: (partial: Partial<PulseState>) => void;
 };
 
@@ -26,10 +25,9 @@ export const usePulse = create<PulseState>((set) => ({
   core: "dancer",
   error: null,
   dragging: false,
-  searching: false,
-  hits: [],
-  query: "",
   chrome: true,
+  mapping: false,
+  mapLabel: "",
   set: (partial) => {
     if (typeof window !== "undefined") {
       try {

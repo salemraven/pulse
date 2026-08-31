@@ -13,10 +13,10 @@ export type CoreStyle = "ring" | "dancer";
 
 export const CORE_STYLES: { id: CoreStyle; label: string }[] = [
   { id: "ring", label: "Ring" },
-  { id: "dancer", label: "Kachujin" },
+  { id: "dancer", label: "Michelle" },
 ];
 
-export type TrackSource = "file" | "search" | "demo";
+export type TrackSource = "file" | "demo";
 
 export type Track = {
   id: string;
@@ -24,16 +24,6 @@ export type Track = {
   artist: string;
   artworkUrl?: string;
   source: TrackSource;
-  preview?: boolean;
-};
-
-export type SearchHit = {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  artworkUrl: string;
-  previewUrl: string;
 };
 
 export type Analysis = {
@@ -43,6 +33,11 @@ export type Analysis = {
   high: number;
   energy: number;
   beat: boolean;
+  hat: boolean;
   drop: boolean;
   flux: number;
+  bpm: number;
+  beatPhase: number;
+  barBeat: number;
+  confidence: number;
 };

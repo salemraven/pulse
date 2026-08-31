@@ -1,25 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Loader2,
   Maximize2,
   Minimize2,
   Pause,
   Play,
-  Search,
   Upload,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import { getEngine } from "@/lib/audio/engine";
 import { readId3 } from "@/lib/audio/id3";
-import { searchTracks } from "@/lib/audio/search";
 import type { CoreStyle, Track, VizMode } from "@/lib/audio/types";
 import { CORE_STYLES, VIZ_MODES } from "@/lib/audio/types";
 import { VisualizerRenderer } from "@/lib/visualizer/renderer";
 import { attachDancer, type DancerStatus } from "@/lib/dancer/kachujin-scene";
 import { usePulse } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn, formatTime } from "@/lib/utils";
 
 const DEMO_TRACK: Track = {
@@ -39,6 +35,7 @@ export function PulseApp() {
   const dancerCanvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const footerRef = useRef<HTMLElement>(null);
+  const landingRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seekRef = useRef<HTMLDivElement>(null);
   const seekFillRef = useRef<HTMLDivElement>(null);
@@ -47,11 +44,10 @@ export function PulseApp() {
   const vizRef = useRef<VisualizerRenderer | null>(null);
   const dancerRef = useRef<ReturnType<typeof attachDancer> | null>(null);
   const idleTimer = useRef<number | null>(null);
-  const searchTimer = useRef<number | null>(null);
   const [duration, setDuration] = useState(0);
-  const [focused, setFocused] = useState(false);
   const [dancerStatus, setDancerStatus] = useState<DancerStatus>("loading");
-  const [dancerDetail, setDancerDetail] = useState("Loading Kachujin…");
+  const [dancerDetail, setDancerDetail] = useState("Loading Mixamo Michelle…");
+  const moveLabelRef = useRef<HTMLSpanElement>(null);
 
   const track = usePulse((s) => s.track);
   const playing = usePulse((s) => s.playing);
@@ -61,10 +57,9 @@ export function PulseApp() {
   const core = usePulse((s) => s.core);
   const error = usePulse((s) => s.error);
   const dragging = usePulse((s) => s.dragging);
-  const searching = usePulse((s) => s.searching);
-  const hits = usePulse((s) => s.hits);
-  const query = usePulse((s) => s.query);
   const chrome = usePulse((s) => s.chrome);
+  const mapping = usePulse((s) => s.mapping);
+  const mapLabel = usePulse((s) => s.mapLabel);
 
   const bumpChrome = useCallback(() => {
     usePulse.getState().set({ chrome: true });
@@ -82,7 +77,8 @@ export function PulseApp() {
     const h = canvas.clientHeight || window.innerHeight;
     const header = headerRef.current?.getBoundingClientRect().height ?? 96;
     const measured = footerRef.current?.getBoundingClientRect().height ?? 0;
-    const footer = measured > 40 ? measured : h * 0.32;
+    const landing = landingRef.current?.getBoundingClientRect().height ?? 0;
+    const footer = (measured > 40 ? measured : Math.max(landing + 16, h * 0.3)) + 18;
     dancer.setChrome(header, footer);
   }, []);
 
@@ -96,6 +92,7 @@ export function PulseApp() {
       if (savedCore && CORE_STYLES.some((c) => c.id === savedCore)) {
         usePulse.setState({ core: savedCore });
       }
+      usePulse.setState({ core: "dancer" });
     } catch {
       /* ignore */
     }
@@ -118,7 +115,7 @@ export function PulseApp() {
         setDancerStatus(status);
         if (detail) setDancerDetail(detail);
         if (status === "error") {
-          usePulse.getState().set({ error: detail ?? "Kachujin did not load." });
+          usePulse.getState().set({ error: detail ?? "Michelle did not load." });
         }
       });
       dancer.enabled = usePulse.getState().core === "dancer";
@@ -159,7 +156,18 @@ export function PulseApp() {
       last = now;
       const sample = engine.sample();
       viz.frame(dt, sample.analysis, sample.freq, sample.wave, engine.isPlaying());
-      dancerRef.current?.frame(dt, sample.analysis, engine.isPlaying());
+      const look = viz.palette;
+      dancerRef.current?.frame(
+        dt,
+        sample.analysis,
+        engine.isPlaying(),
+        look.hue,
+        look.flash,
+        engine.getCurrentTime(),
+      );
+      if (moveLabelRef.current && dancerRef.current?.clipLabel) {
+        moveLabelRef.current.textContent = dancerRef.current.clipLabel;
+      }
       const t = engine.getCurrentTime();
       const d = engine.getDuration();
       if (seekFillRef.current && Number.isFinite(d) && d > 0) {
@@ -200,7 +208,7 @@ export function PulseApp() {
 
   useEffect(() => {
     syncDancerChrome();
-  }, [track, chrome, syncDancerChrome]);
+  }, [track, chrome, dancerStatus, syncDancerChrome]);
 
   useEffect(() => {
     if (vizRef.current && track) vizRef.current.setTrack(track.title, track.artist);
@@ -252,50 +260,45 @@ export function PulseApp() {
       /* filename fallback */
     }
     const next: Track = { id: file.name, title, artist, artworkUrl, source: "file" };
-    usePulse.getState().set({ track: next, error: null, hits: [], playing: true, chrome: true });
+    usePulse.getState().set({ track: next, error: null, playing: true, chrome: true, mapping: true, mapLabel: "" });
     vizRef.current?.setTrack(title, artist);
+    dancerRef.current?.setMap({ bpm: 128, duration: 0, cues: [], drops: 0 });
     try {
       await engine.loadFile(file);
       setDuration(engine.getDuration());
     } catch {
-      usePulse.getState().set({ error: "Could not decode that file.", playing: false });
+      usePulse.getState().set({ error: "Could not decode that file.", playing: false, mapping: false });
+      return;
     }
+    void engine.scanFile(file).then((map) => {
+      if (usePulse.getState().track?.id !== file.name) return;
+      if (map) {
+        dancerRef.current?.setMap(map);
+        usePulse.getState().set({
+          mapping: false,
+          mapLabel: `${Math.round(map.bpm)} BPM · ${map.drops} drop${map.drops === 1 ? "" : "s"} · ${map.cues.length} cues`,
+        });
+      } else {
+        usePulse.getState().set({ mapping: false, mapLabel: "" });
+      }
+    });
   }, []);
 
   const playDemo = useCallback(() => {
     const engine = getEngine();
     engine.unlock();
     engine.playDemo();
+    dancerRef.current?.setMap(null);
     usePulse.getState().set({
       track: DEMO_TRACK,
       playing: true,
       error: null,
-      hits: [],
       chrome: true,
+      mapping: false,
+      mapLabel: "",
     });
     vizRef.current?.setTrack(DEMO_TRACK.title, DEMO_TRACK.artist);
     setDuration(0);
-  }, []);
-
-  const playHit = useCallback(async (hit: (typeof hits)[number]) => {
-    const engine = getEngine();
-    engine.unlock();
-    const next: Track = {
-      id: hit.id,
-      title: hit.title,
-      artist: hit.artist,
-      artworkUrl: hit.artworkUrl,
-      source: "search",
-      preview: true,
-    };
-    usePulse.getState().set({ track: next, error: null, hits: [], query: "", playing: true, chrome: true });
-    vizRef.current?.setTrack(hit.title, hit.artist);
-    try {
-      await engine.loadUrl(`/api/preview?src=${encodeURIComponent(hit.previewUrl)}`);
-      setDuration(engine.getDuration());
-    } catch {
-      usePulse.getState().set({ error: "Preview failed to load. Try another result.", playing: false });
-    }
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -336,28 +339,6 @@ export function PulseApp() {
     const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const d = engine.getDuration();
     if (Number.isFinite(d) && d > 0) engine.seek(t * d);
-  }, []);
-
-  const onSearchChange = useCallback((value: string) => {
-    usePulse.getState().set({ query: value, error: null });
-    if (searchTimer.current) window.clearTimeout(searchTimer.current);
-    if (!value.trim()) {
-      usePulse.getState().set({ hits: [], searching: false });
-      return;
-    }
-    usePulse.getState().set({ searching: true });
-    searchTimer.current = window.setTimeout(async () => {
-      try {
-        const results = await searchTracks({ data: { q: value.trim() } });
-        if (usePulse.getState().query.trim() !== value.trim()) return;
-        usePulse.getState().set({ hits: results, searching: false });
-      } catch {
-        usePulse.getState().set({
-          searching: false,
-          error: "Search could not reach the catalog. Drop an MP3 instead.",
-        });
-      }
-    }, 320);
   }, []);
 
   useEffect(() => {
@@ -421,7 +402,7 @@ export function PulseApp() {
         <div className="pointer-events-none absolute inset-x-0 top-1/2 z-[3] flex -translate-y-1/2 flex-col items-center px-6 text-center">
           {dancerStatus === "loading" ? (
             <p className="rounded-lg bg-surface/80 px-3 py-2 text-sm text-muted backdrop-blur-sm">
-              Loading Kachujin…
+              Loading Mixamo Michelle…
             </p>
           ) : (
             <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-lg bg-surface/90 px-4 py-3 backdrop-blur-sm">
@@ -438,6 +419,11 @@ export function PulseApp() {
         </div>
       ) : null}
 
+      {core === "dancer" && dancerStatus === "ready" ? (
+        <p className="pointer-events-none absolute top-[max(1.15rem,calc(env(safe-area-inset-top)+0.6rem))] left-1/2 z-[11] -translate-x-1/2 rounded-full bg-surface/20 px-3 py-1 font-mono text-[11px] tracking-[0.18em] text-fg/50 uppercase backdrop-blur-[2px]">
+          Michelle · <span ref={moveLabelRef}>Samba</span>
+        </p>
+      ) : null}
       <div
         className={cn(
           "pointer-events-none absolute inset-0 bg-linear-to-b from-bg/70 via-transparent to-bg/80 transition-opacity duration-200 ease-smooth-out",
@@ -450,7 +436,7 @@ export function PulseApp() {
         className={cn(
           "absolute inset-x-0 top-0 z-10 flex flex-col items-stretch gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 sm:flex-row sm:items-start sm:justify-between sm:px-6",
           "transition-[opacity,transform] duration-200 ease-smooth-out",
-          chrome || showLanding || focused || dragging || hits.length
+          chrome || showLanding || dragging
             ? "opacity-100 translate-y-0"
             : "pointer-events-none opacity-0 -translate-y-2",
         )}
@@ -459,66 +445,19 @@ export function PulseApp() {
           <p className="font-display text-lg font-semibold tracking-tight text-fg">PULSE</p>
           <p className="text-xs text-muted">See the sound</p>
         </div>
-        <div className="flex w-full max-w-none flex-col items-stretch gap-2 sm:max-w-md">
-          <label className="sr-only" htmlFor="song-search">
-            Search for a song
-          </label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle" />
-            <Input
-              id="song-search"
-              value={query}
-              placeholder="Type a song name"
-              autoComplete="off"
-              onFocus={() => setFocused(true)}
-              onBlur={() => window.setTimeout(() => setFocused(false), 180)}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="h-11 rounded-lg bg-surface/90 pr-10 pl-10 backdrop-blur-sm"
-            />
-            {searching ? (
-              <Loader2 className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-muted" />
-            ) : null}
-          </div>
-          {hits.length > 0 ? (
-            <ul className="max-h-72 overflow-auto rounded-xl bg-surface p-1.5 shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-fg)_12%,transparent),0_16px_40px_rgba(0,0,0,0.4)]">
-              {hits.map((hit) => (
-                <li key={hit.id}>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => void playHit(hit)}
-                    className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-2"
-                  >
-                    <img
-                      src={hit.artworkUrl}
-                      alt=""
-                      className="size-10 shrink-0 rounded-sm object-cover outline outline-1 -outline-offset-1 outline-fg/10"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-fg">{hit.title}</span>
-                      <span className="block truncate text-xs text-muted">{hit.artist}</span>
-                    </span>
-                    <span className="font-mono text-xs tracking-wide text-subtle uppercase">30s</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : query.trim() && !searching ? (
-            <p className="rounded-lg bg-surface px-3 py-2 text-xs text-muted">
-              No previews for that title. Try another name, or drop an MP3.
-            </p>
-          ) : null}
-        </div>
       </header>
 
       {showLanding ? (
-        <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-center px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div
+          ref={landingRef}
+          className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-center px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+        >
           <div className="flex w-full max-w-lg flex-col items-center pb-2 text-center">
             <p className="font-display text-3xl leading-tight font-semibold tracking-tight text-fg sm:text-4xl">
               Drop a track. Watch the room move.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted">
-              Drag in an MP3, search any song for a preview, or start the house loop. The picture follows bass, mids, and the drop.
+              Drag in an MP3 or start the house loop. The picture follows bass, mids, and the drop.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Button onClick={playDemo} className="h-12 rounded-lg px-5">
@@ -567,7 +506,7 @@ export function PulseApp() {
               <p className="truncate font-display text-sm font-semibold text-fg">{track?.title}</p>
               <p className="truncate text-xs text-muted">
                 {track?.artist}
-                {track?.preview ? " · 30s preview" : track?.source === "demo" ? " · generated loop" : ""}
+                {track?.source === "demo" ? " · generated loop" : mapping ? " · mapping drops…" : mapLabel ? ` · ${mapLabel}` : ""}
               </p>
             </div>
             <Button variant="ghost" size="icon" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>

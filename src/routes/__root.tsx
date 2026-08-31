@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "Drop an MP3 or search a track. PULSE turns electronic music into a live visual room.",
+        content: "Drop an MP3 or play the house loop. PULSE turns electronic music into a live visual room.",
       },
       { name: "theme-color", content: "#07070a" },
     ],

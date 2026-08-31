@@ -40,6 +40,7 @@ export class VisualizerRenderer {
   private shake = 0;
   private flash = 0;
   private hue = 186;
+  private floodSlot = 0;
   private bars = new Float32Array(BAR_COUNT);
   private peaks = new Float32Array(BAR_COUNT);
   private particles: Particle[] = [];
@@ -50,6 +51,10 @@ export class VisualizerRenderer {
   private reduced = false;
   mode: VizMode = "auto";
   hideCenter = false;
+
+  get palette() {
+    return { hue: this.hue, flash: this.flash };
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -89,6 +94,7 @@ export class VisualizerRenderer {
       this.shake = this.reduced ? 0 : 10 + a.bass * 14;
       this.flash = 0.22 + a.bass * 0.28;
       this.burst(a);
+      this.floodSlot = (this.floodSlot + 1) % 3;
     }
     if (a.drop) {
       this.flash = 0.55;
@@ -111,12 +117,14 @@ export class VisualizerRenderer {
 
     const mode = this.mode === "auto" ? this.autoMode(a) : this.mode;
     this.drawStars(a, mode === "tunnel");
+    this.drawFloods(a);
     if (mode === "grid" || (this.mode === "auto" && a.energy > 0.22)) this.drawGrid(a);
     if (mode === "tunnel" || (this.mode === "auto" && a.energy > 0.5)) this.drawTunnel(a);
     if (mode === "wave") this.drawWaves(a, wave);
     else this.drawHorizonWave(a, wave);
     if (mode === "storm" || this.mode === "auto") this.drawStorm(a);
     if (mode !== "wave") this.drawOrbital(a);
+    this.drawLasers(a);
     this.stepParticles(dt, a);
     if (!this.hideCenter) this.drawCenter(a);
     this.drawTitle(a);
@@ -139,8 +147,13 @@ export class VisualizerRenderer {
       high: Math.max(base.high, 0.1 + pulse2 * 0.08),
       energy: Math.max(base.energy, 0.2 + pulse * 0.12),
       beat: base.beat,
+      hat: base.hat,
       drop: base.drop,
       flux: Math.max(base.flux, 0.04),
+      bpm: base.bpm,
+      beatPhase: base.beatPhase,
+      barBeat: base.barBeat,
+      confidence: base.confidence,
     };
   }
 
@@ -403,6 +416,60 @@ export class VisualizerRenderer {
         y = cy + Math.sin(ang) * dist + (Math.random() - 0.5) * 24;
         ctx.lineTo(x, y);
       }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private drawFloods(a: Analysis) {
+    const ctx = this.ctx;
+    const wash = ctx.createLinearGradient(0, 0, 0, this.h * 0.34);
+    const top = 0.1 + a.bass * 0.18 + this.flash * 0.42;
+    wash.addColorStop(0, `hsla(${this.hue}, 100%, 68%, ${top})`);
+    wash.addColorStop(0.45, `hsla(${this.hue + 20}, 90%, 50%, ${top * 0.35})`);
+    wash.addColorStop(1, `hsla(${this.hue}, 80%, 40%, 0)`);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, this.w, this.h * 0.36);
+    const xs = [0.22, 0.5, 0.78];
+    for (let i = 0; i < xs.length; i++) {
+      const x = this.w * xs[i]!;
+      const kickHit = i === this.floodSlot ? 1 : 0;
+      const hatHit = i === (this.floodSlot + 1) % 3 ? a.high : 0;
+      const pulse = kickHit * (a.bass + this.flash) + hatHit * 0.6;
+      const r = this.w * (0.14 + pulse * 0.1);
+      const g = ctx.createRadialGradient(x, 8, 4, x, 12, r);
+      g.addColorStop(0, `hsla(${this.hue + i * 120}, 100%, 70%, ${0.04 + pulse * 0.55})`);
+      g.addColorStop(0.45, `hsla(${this.hue + i * 120}, 100%, 52%, ${0.02 + pulse * 0.22})`);
+      g.addColorStop(1, `hsla(${this.hue + i * 120}, 90%, 40%, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, 0, r * 2, r * 1.3);
+    }
+    ctx.restore();
+  }
+
+  private drawLasers(a: Analysis) {
+    const ctx = this.ctx;
+    const cx = this.w / 2;
+    const cy = this.h * 0.5;
+    const n = 4;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < n; i++) {
+      const side = i < 2 ? -1 : 1;
+      const k = i % 2;
+      const ox = cx + side * (this.w * 0.16 + k * this.w * 0.1);
+      const oy = -20;
+      const sway = Math.sin(this.t * (0.5 + k * 0.12) + i) * this.w * 0.08;
+      const tx = cx + sway * 0.25;
+      const ty = cy + 40 + Math.sin(this.t * 0.7 + i) * 16;
+      const alpha = 0.06 + a.energy * 0.1 + this.flash * 0.4 + (i % 2 ? a.high : a.bass) * 0.1;
+      ctx.strokeStyle = `hsla(${this.hue + i * 22}, 100%, 58%, ${alpha})`;
+      ctx.lineWidth = 1.4 + this.flash * 6 + a.bass * 2;
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(tx, ty);
       ctx.stroke();
     }
     ctx.restore();

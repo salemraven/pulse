@@ -1,21 +1,22 @@
 # PULSE
 
-A full-screen **electronic music visualizer**. Drop an MP3, search a song, or play the built-in house loop — the room follows the kick, the mids, and the drop. In the middle of the stage, Mixamo’s **Kachujin** dances to the beat.
+A full-screen **electronic music visualizer**. Drop an MP3 or play the built-in house loop — the room follows the kick, the mids, and the drop. In the middle of the stage, Mixamo’s **Michelle** dances to the beat.
 
 Live source: [github.com/salemraven/pulse](https://github.com/salemraven/pulse)
+
+Adding more Mixamo loops: [MIXAMO.md](MIXAMO.md)
 
 ---
 
 ## What you can do
 
 - **Drag and drop** an MP3 (also WAV, AAC, M4A, OGG, FLAC)
-- **Search a song name** for a 30-second catalog preview
 - **Play a generated 128 BPM house loop** (kick, clap, hats, bass, stab)
 - Switch **room modes**: Auto, Orbital, Tunnel, Grid, Storm, Wave
-- Switch the **center**: **Kachujin** (3D dancer) or **Ring** (classic glow)
-- Fullscreen, volume, seek on local files and previews
+- Switch the **center**: **Michelle** (3D dancer) or **Ring** (classic glow)
+- Fullscreen, volume, seek on local files
 
-Dropped files play in the browser. They are **not uploaded**. Search uses short previews from the iTunes catalog.
+Dropped files play in the browser. They are **not uploaded**.
 
 ---
 
@@ -83,7 +84,7 @@ Characters and motions © Adobe Mixamo.
 | Space | Play / pause |
 | F | Fullscreen |
 | M | Mute |
-| ← → | Seek (local files and previews) |
+| ← → | Seek (local files) |
 
 ---
 
@@ -91,10 +92,9 @@ Characters and motions © Adobe Mixamo.
 
 ```
 src/
-  components/pulse/pulse-app.tsx   UI, drag-drop, search, player, canvases
+  components/pulse/pulse-app.tsx   UI, drag-drop, player, canvases
   lib/audio/engine.ts              Web Audio graph, FFT, beat / drop
   lib/audio/demo.ts                128 BPM house loop
-  lib/audio/search.ts              iTunes search (server function)
   lib/audio/id3.ts                 local file tags + artwork
   lib/visualizer/renderer.ts       Canvas 2D room
   lib/dancer/kachujin-scene.ts     Three.js dancer
@@ -102,8 +102,7 @@ src/
 ```
 
 - **2D canvas** — full viewport, opaque club picture
-- **3D canvas** — full viewport, transparent, `z-index: 2`, only visible when Core is Kachujin
-- Preview search is proxied so the audio element can play cross-origin catalog clips
+- **3D canvas** — full viewport, transparent, `z-index: 2`, only visible when Core is Michelle
 
 Stack: React 19, TanStack Start, Tailwind v4, Zustand, Web Audio API, Canvas 2D, Three.js.
 
@@ -130,7 +129,6 @@ npm run build
 ## Privacy
 
 - Local files never leave the browser (`blob:` URLs).
-- Search sends only the typed title to iTunes Search, then streams a short preview.
 - Volume, room mode, and center style are stored in `localStorage` on this device.
 
 ---
