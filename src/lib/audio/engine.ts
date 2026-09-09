@@ -1,5 +1,5 @@
 import { DemoLoop } from "./demo";
-import { mapTrack, type TrackMap } from "./map-track";
+import { houseLoopMap, mapTrack, type TrackMap } from "./map-track";
 import type { Analysis } from "./types";
 
 const FFT = 2048;
@@ -227,7 +227,7 @@ export class AudioEngine {
     this.mode = "demo";
     this.resetClock();
     this.bpm = 128;
-    this.clearMap();
+    this.trackMap = houseLoopMap();
   }
 
   private stopDemo() {

@@ -30,6 +30,11 @@ function isAudioFile(file: File) {
   return /\.(mp3|wav|ogg|m4a|aac|flac|mpeg)$/i.test(file.name);
 }
 
+function isImageFile(file: File) {
+  if (file.type.startsWith("image/")) return true;
+  return /\.(jpe?g|png|webp|gif|avif|bmp)$/i.test(file.name);
+}
+
 export function PulseApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dancerCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,6 +50,8 @@ export function PulseApp() {
   const dancerRef = useRef<ReturnType<typeof attachDancer> | null>(null);
   const idleTimer = useRef<number | null>(null);
   const [duration, setDuration] = useState(0);
+  const [backdropUrl, setBackdropUrl] = useState<string | null>(null);
+  const backdropUrlRef = useRef<string | null>(null);
   const [dancerStatus, setDancerStatus] = useState<DancerStatus>("loading");
   const [dancerDetail, setDancerDetail] = useState("Loading Mixamo Michelle…");
   const moveLabelRef = useRef<HTMLSpanElement>(null);
@@ -106,6 +113,7 @@ export function PulseApp() {
     const viz = new VisualizerRenderer(canvas);
     viz.mode = usePulse.getState().mode;
     viz.hideCenter = usePulse.getState().core === "dancer";
+    viz.backdrop = Boolean(backdropUrlRef.current);
     vizRef.current = viz;
     viz.resize();
 
@@ -262,7 +270,7 @@ export function PulseApp() {
     const next: Track = { id: file.name, title, artist, artworkUrl, source: "file" };
     usePulse.getState().set({ track: next, error: null, playing: true, chrome: true, mapping: true, mapLabel: "" });
     vizRef.current?.setTrack(title, artist);
-    dancerRef.current?.setMap({ bpm: 128, duration: 0, cues: [], drops: 0 });
+    dancerRef.current?.setMap({ bpm: 128, duration: 0, cues: [], drops: 0, beats: [], confidence: 0 });
     try {
       await engine.loadFile(file);
       setDuration(engine.getDuration());
@@ -276,7 +284,7 @@ export function PulseApp() {
         dancerRef.current?.setMap(map);
         usePulse.getState().set({
           mapping: false,
-          mapLabel: `${Math.round(map.bpm)} BPM · ${map.drops} drop${map.drops === 1 ? "" : "s"} · ${map.cues.length} cues`,
+          mapLabel: `${Math.round(map.bpm)} BPM · ${map.beats.length} beats · ${map.drops} drop${map.drops === 1 ? "" : "s"}`,
         });
       } else {
         usePulse.getState().set({ mapping: false, mapLabel: "" });
@@ -288,18 +296,44 @@ export function PulseApp() {
     const engine = getEngine();
     engine.unlock();
     engine.playDemo();
-    dancerRef.current?.setMap(null);
+    dancerRef.current?.setMap(engine.trackMap);
     usePulse.getState().set({
       track: DEMO_TRACK,
       playing: true,
       error: null,
       chrome: true,
       mapping: false,
-      mapLabel: "",
+      mapLabel: "128 BPM · house loop",
     });
     vizRef.current?.setTrack(DEMO_TRACK.title, DEMO_TRACK.artist);
     setDuration(0);
   }, []);
+
+  const loadBackdrop = useCallback((file: File) => {
+    if (backdropUrlRef.current) URL.revokeObjectURL(backdropUrlRef.current);
+    const url = URL.createObjectURL(file);
+    backdropUrlRef.current = url;
+    setBackdropUrl(url);
+    if (vizRef.current) vizRef.current.backdrop = true;
+    usePulse.getState().set({ error: null });
+  }, []);
+
+  const loadDropped = useCallback(
+    (files: FileList | File[]) => {
+      const list = [...files];
+      const image = list.find(isImageFile);
+      const audio = list.find(isAudioFile);
+      if (image) loadBackdrop(image);
+      if (audio) {
+        void loadFile(audio);
+        return;
+      }
+      if (!image && list[0]) {
+        usePulse.getState().set({ error: "Drop an MP3 or a JPG." });
+      }
+    },
+    [loadBackdrop, loadFile],
+  );
 
   const togglePlay = useCallback(() => {
     const engine = engineRef.current ?? getEngine();
@@ -354,8 +388,8 @@ export function PulseApp() {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
       usePulse.getState().set({ dragging: false });
-      const file = e.dataTransfer?.files?.[0];
-      if (file) void loadFile(file);
+      const files = e.dataTransfer?.files;
+      if (files?.length) loadDropped(files);
     };
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("dragleave", onDragLeave);
@@ -365,7 +399,13 @@ export function PulseApp() {
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [loadFile]);
+  }, [loadDropped]);
+
+  useEffect(() => {
+    return () => {
+      if (backdropUrlRef.current) URL.revokeObjectURL(backdropUrlRef.current);
+    };
+  }, []);
 
   const [isFs, setIsFs] = useState(false);
   const toggleFullscreen = useCallback(async () => {
@@ -388,7 +428,15 @@ export function PulseApp() {
       onPointerMove={bumpChrome}
       onPointerDown={bumpChrome}
     >
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
+      {backdropUrl ? (
+        <img
+          src={backdropUrl}
+          alt=""
+          className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
+          aria-hidden="true"
+        />
+      ) : null}
+      <canvas ref={canvasRef} className="absolute inset-0 z-[1] h-full w-full" aria-hidden="true" />
       <canvas
         ref={dancerCanvasRef}
         className={cn(
@@ -420,7 +468,7 @@ export function PulseApp() {
       ) : null}
 
       {core === "dancer" && dancerStatus === "ready" ? (
-        <p className="pointer-events-none absolute top-[max(1.15rem,calc(env(safe-area-inset-top)+0.6rem))] left-1/2 z-[11] -translate-x-1/2 rounded-full bg-surface/20 px-3 py-1 font-mono text-[11px] tracking-[0.18em] text-fg/50 uppercase backdrop-blur-[2px]">
+        <p className="pointer-events-none absolute top-[max(1.15rem,calc(env(safe-area-inset-top)+0.6rem))] left-1/2 z-[11] -translate-x-1/2 rounded-full bg-surface/10 px-3 py-1 font-mono text-[11px] tracking-[0.18em] text-fg/50 uppercase backdrop-blur-[2px]">
           Michelle · <span ref={moveLabelRef}>Samba</span>
         </p>
       ) : null}
@@ -457,7 +505,7 @@ export function PulseApp() {
               Drop a track. Watch the room move.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted">
-              Drag in an MP3 or start the house loop. The picture follows bass, mids, and the drop.
+              Drag in an MP3 or a JPG. The picture sits behind the dancer; the room still follows the drop.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Button onClick={playDemo} className="h-12 rounded-lg px-5">
@@ -622,18 +670,18 @@ export function PulseApp() {
 
       {dragging ? (
         <div className="absolute inset-4 z-20 grid place-items-center rounded-xl shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-fg)_28%,transparent)]">
-          <p className="font-display text-xl font-semibold text-fg">Drop to load</p>
+          <p className="font-display text-xl font-semibold text-fg">Drop a track or a photo</p>
         </div>
       ) : null}
 
       <input
         ref={fileRef}
         type="file"
-        accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac"
+        accept="audio/*,image/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.jpg,.jpeg,.png,.webp"
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void loadFile(file);
+          const files = e.target.files;
+          if (files?.length) loadDropped(files);
           e.target.value = "";
         }}
       />

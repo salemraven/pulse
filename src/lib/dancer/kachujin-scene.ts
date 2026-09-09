@@ -8,8 +8,12 @@ import type { TrackMap } from "@/lib/audio/map-track";
 const MODEL_URL = "/models/michelle.glb?v=1";
 const PACK_URLS = ["/models/dances.glb?v=bind"];
 const FBX_PACKS = [
-  { url: "/models/maraschino.fbx?v=1", name: "MaraschinoStep" },
   { url: "/models/groove.fbx?v=1", name: "Groove" },
+  { url: "/models/running-man.fbx?v=1", name: "RunningMan" },
+  { url: "/models/swing.fbx?v=1", name: "Swing" },
+  { url: "/models/rumba.fbx?v=1", name: "Rumba" },
+  { url: "/models/shuffle.fbx?v=1", name: "Shuffle" },
+  { url: "/models/slide.fbx?v=1", name: "Slide" },
 ];
 const HIP_FIX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 
@@ -68,6 +72,74 @@ function boneName(raw: string) {
   return raw.replace(/^mixamorig:/, "mixamorig");
 }
 
+function sampleQuat(track: THREE.KeyframeTrack, t: number, into: THREE.Quaternion) {
+  const times = track.times;
+  const v = track.values;
+  if (!times.length) return into.identity();
+  if (t <= times[0]!) return into.set(v[0]!, v[1]!, v[2]!, v[3]!);
+  const last = times.length - 1;
+  if (t >= times[last]!) {
+    const i = last * 4;
+    return into.set(v[i]!, v[i + 1]!, v[i + 2]!, v[i + 3]!);
+  }
+  let i = 1;
+  while (times[i]! < t) i += 1;
+  const a = (i - 1) * 4;
+  const b = i * 4;
+  const u = (t - times[i - 1]!) / Math.max(1e-5, times[i]! - times[i - 1]!);
+  const qa = new THREE.Quaternion(v[a]!, v[a + 1]!, v[a + 2]!, v[a + 3]!);
+  const qb = new THREE.Quaternion(v[b]!, v[b + 1]!, v[b + 2]!, v[b + 3]!);
+  return into.copy(qa).slerp(qb, u);
+}
+
+function quatDeltaDeg(a: THREE.Quaternion, b: THREE.Quaternion) {
+  return Math.acos(Math.min(1, Math.abs(a.dot(b)))) * (360 / Math.PI);
+}
+
+function sealLoop(clip: THREE.AnimationClip) {
+  const dur = clip.duration;
+  if (dur < 1.2) return clip;
+  const bones = clip.tracks.filter(
+    (t) => /\.quaternion$/.test(t.name) && /hips|spine$|spine1|leftarm|rightarm|leftupleg|rightupleg/i.test(t.name),
+  );
+  if (bones.length < 3) return clip;
+  const cur = new THREE.Quaternion();
+  const ends = bones.map((tr) => sampleQuat(tr, dur, new THREE.Quaternion()));
+  const errAt = (t: number) => {
+    let s = 0;
+    for (let i = 0; i < bones.length; i++) {
+      sampleQuat(bones[i]!, t, cur);
+      s += quatDeltaDeg(ends[i]!, cur);
+    }
+    return s / bones.length;
+  };
+  const base = errAt(0);
+  let bestT = 0;
+  let best = base;
+  const limit = Math.min(dur * 0.5, 2.4);
+  for (let t = 0; t <= limit; t += 1 / 30) {
+    const e = errAt(t);
+    if (e < best) {
+      best = e;
+      bestT = t;
+    }
+  }
+  if (bestT < 0.08 || base - best < 6) return clip;
+  if (bestT > dur * 0.22 || dur - bestT < 3) return clip;
+  const fps = 30;
+  const trimmed = THREE.AnimationUtils.subclip(clip, clip.name, bestT * fps, dur * fps, fps);
+  trimmed.name = clip.name;
+  return makeQuatsContinuous(trimmed);
+}
+
+function trimHead(clip: THREE.AnimationClip, seconds: number) {
+  if (seconds < 0.05 || clip.duration < seconds + 1.2) return clip;
+  const fps = 30;
+  const next = THREE.AnimationUtils.subclip(clip, clip.name, seconds * fps, clip.duration * fps, fps);
+  next.name = clip.name;
+  return makeQuatsContinuous(next);
+}
+
 function retargetClip(clip: THREE.AnimationClip) {
   const next = clip.clone();
   next.name = clip.name.replace(/\(1\)/, "").trim();
@@ -103,17 +175,23 @@ function retargetClip(clip: THREE.AnimationClip) {
     tracks.push(track);
   }
   next.tracks = tracks;
-  return stripBind(next);
+  let out = stripBind(next);
+  if (/swing/i.test(out.name) || /swing/i.test(clip.name)) out = trimHead(out, 0.5);
+  return sealLoop(out);
 }
 
 function prettyClip(name: string) {
-  const n = name.replace(/\(1\)/, "").trim();
+  const n = name.replace(/\(1\)/, "").replace(/__echo$/, "").trim();
   if (/samba/i.test(n)) return "Samba";
   if (/bboy/i.test(n)) return "B-boy";
   if (/silly/i.test(n)) return "Silly";
   if (/groove/i.test(n)) return "Groove";
+  if (/running/i.test(n)) return "Running Man";
+  if (/swing/i.test(n)) return "Swing";
+  if (/rumba/i.test(n)) return "Rumba";
+  if (/shuffle/i.test(n)) return "Shuffle";
+  if (/slide/i.test(n)) return "Slide";
   if (/hip/i.test(n)) return "Hip Hop";
-  if (/maras/i.test(n)) return "Maraschino";
   return n.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
@@ -133,6 +211,19 @@ function snapClipTempo(bpm: number) {
   }
   return best;
 }
+
+const CLIP_BPM: [RegExp, number][] = [
+  [/samba/i, 120],
+  [/groove/i, 128],
+  [/running/i, 128],
+  [/swing/i, 100],
+  [/rumba/i, 108],
+  [/shuffle/i, 112],
+  [/slide/i, 128],
+  [/silly/i, 120],
+  [/bboy/i, 120],
+  [/hip/i, 96],
+];
 
 function clipMeta(clip: THREE.AnimationClip): ClipMeta {
   const dur = Math.max(clip.duration, 0.1);
@@ -170,14 +261,20 @@ function clipMeta(clip: THREE.AnimationClip): ClipMeta {
     const beatsGuess = Math.max(4, Math.round((dur * 2) / 4) * 4);
     bpm = snapClipTempo((beatsGuess * 60) / dur);
   }
+  for (const [re, lock] of CLIP_BPM) {
+    if (re.test(clip.name)) {
+      bpm = lock;
+      break;
+    }
+  }
   const beats = Math.max(4, Math.round((dur * bpm) / 60 / 4) * 4);
   return { bpm, beats, plants };
 }
 
 function isPackDance(clip: THREE.AnimationClip) {
   const n = clip.name;
-  if (/flair|samba|tpose|t-pose|t pose|idle|walk|run/i.test(n)) return false;
-  return /dance|hip|bboy|silly|chicken|pocket|lock|wave|salsa|jazz|rumba|house|swing/i.test(n) && clip.tracks.length > 10;
+  if (/flair|samba|tpose|t-pose|t pose|idle|walk|run|chicken|pocket|maras/i.test(n)) return false;
+  return /dance|hip|bboy|silly|lock|wave|salsa|jazz|rumba|house|swing|groove|shuffle|slide/i.test(n) && clip.tracks.length > 10;
 }
 
 function isTPose(clip: THREE.AnimationClip | string) {
@@ -247,6 +344,8 @@ export class DancerScene {
   private flashAmt = 0;
   private lightHue = 186;
   private floodSlot = 0;
+  private floodPair = 1;
+  private floodHold = 0;
   private speed = 0.9;
   private loadId = 0;
   private loading = false;
@@ -264,6 +363,11 @@ export class DancerScene {
   private bag: number[] = [];
   private map: TrackMap | null = null;
   private queued = 0;
+  private pending: { reason: string } | null = null;
+  private cueI = 0;
+  private lastSong = 0;
+  private centerX = 0;
+  private aim = new THREE.Vector3();
   private meta: ClipMeta[] = [];
   private echoes: THREE.AnimationAction[] = [];
   private hips: THREE.Object3D | null = null;
@@ -525,26 +629,33 @@ export class DancerScene {
   private beginLoopBlend() {
     if (this.fadeFrom || !this.action) return;
     const dur = this.action.getClip().duration;
-    if (dur < 0.9) return;
-    const rate = Math.max(0.35, this.action.timeScale);
+    if (dur < 0.75) {
+      this.action.setLoop(THREE.LoopRepeat, Infinity);
+      return;
+    }
+    const rate = Math.max(0.35, Math.abs(this.action.timeScale) || this.speed);
     const remaining = (dur - this.action.time) / rate;
-    if (remaining > 0.9) return;
-    if (remaining < 0.12) return;
-    const echo = this.echoes[this.cursor];
-    if (!echo || echo === this.action) return;
+    if (remaining > Math.min(1.15, dur * 0.4)) return;
     this.action.setLoop(THREE.LoopOnce, 1);
     this.action.clampWhenFinished = true;
+    if (this.action.time > dur - 0.04) this.action.time = dur - 0.04;
+    if (this.actions.length > 1 && !this.pending && this.held >= 4) {
+      this.pending = { reason: "loopEnd" };
+      return;
+    }
+    const echo = this.echoes[this.cursor];
+    if (!echo || echo === this.action) return;
     echo.enabled = true;
     echo.paused = false;
     echo.clampWhenFinished = false;
     echo.setLoop(THREE.LoopRepeat, Infinity);
-    echo.time = 0.08;
+    echo.time = /swing/i.test(echo.getClip().name) ? 0.22 : 0.12;
     echo.setEffectiveTimeScale(this.speed);
     echo.setEffectiveWeight(0);
-    echo.play();
+    if (!echo.isRunning()) echo.play();
     this.fadeFrom = this.action;
     this.fadeT = 0;
-    this.fadeDur = Math.min(0.85, Math.max(0.4, remaining * 0.92));
+    this.fadeDur = Math.min(1.15, Math.max(0.65, remaining * 0.88));
     this.action = echo;
     this.echoes[this.cursor] = this.fadeFrom;
     this.actions[this.cursor] = echo;
@@ -573,30 +684,47 @@ export class DancerScene {
     const pick = this.actions[this.cursor];
     if (!pick || pick === this.action || isTPose(pick.getClip())) return;
     const prev = this.action;
+    const keep = pick.time;
     pick.enabled = true;
-    pick.paused = false;
     pick.clampWhenFinished = false;
     pick.setLoop(THREE.LoopRepeat, Infinity);
     pick.setEffectiveTimeScale(this.speed);
-    pick.play();
+    pick.setEffectiveWeight(0);
+    if (!pick.isRunning()) pick.play();
+    pick.paused = false;
+    const durPick = Math.max(pick.getClip().duration, 0.1);
+    const minT = /swing/i.test(pick.getClip().name) ? 0.22 : 0.08;
+    let t = keep;
+    if (t < minT || t > durPick - 0.25) {
+      t = this.meta[this.cursor]?.plants.find((p) => p >= minT) ?? minT;
+    }
+    pick.time = t;
     prev.enabled = true;
     prev.paused = false;
-    prev.setLoop(THREE.LoopOnce, 1);
-    prev.clampWhenFinished = true;
+    prev.clampWhenFinished = false;
+    prev.setLoop(THREE.LoopRepeat, Infinity);
+    prev.setEffectiveWeight(1);
     this.fadeFrom = prev;
     this.fadeT = 0;
-    this.fadeDur = 1.05;
+    this.fadeDur = 1.15;
     this.action = pick;
     this.clipLabel = prettyClip(pick.getClip().name);
     this.beats = 0;
     this.held = 0;
     this.queued = 0;
-    this.untilSwitch = 16 + Math.floor(Math.random() * 8);
-    this.untilHold = this.untilSwitch * (60 / 128);
+    this.pending = null;
+    this.untilSwitch = 16 + Math.floor(Math.random() * 4);
+    this.untilHold = 8;
   }
 
   setMap(map: TrackMap | null) {
     this.map = map;
+    this.cueI = 0;
+    this.pending = null;
+    if (map && map.duration > 1) {
+      this.held = 0;
+      this.beats = 0;
+    }
   }
 
   private currentMeta() {
@@ -612,7 +740,6 @@ export class DancerScene {
     const sy = THREE.MathUtils.clamp(this.squashAmt, 0.94, 1.03);
     const sx = THREE.MathUtils.clamp(1 + (1 - sy) * 0.35, 0.97, 1.06);
     this.root.scale.set(sx, sy, sx);
-    this.root.position.set(0, this.bounceY, 0);
   }
 
   frame(dt: number, a: Analysis, playing: boolean, vizHue = 186, vizFlash = 0, songTime = 0) {
@@ -628,7 +755,10 @@ export class DancerScene {
     const follow = 1 - Math.exp(-dt * 9);
     const fall = Math.exp(-dt * 4.2);
     if (a.beat || a.drop) {
-      this.floodSlot = (this.floodSlot + 1) % Math.max(1, this.floods.length || 3);
+      this.floodSlot = (this.floodSlot + 1 + (Math.random() < 0.35 ? 1 : 0)) % Math.max(1, this.floods.length || 3);
+      this.floodPair = Math.random() < 0.62 ? (this.floodSlot + 1 + (Math.random() < 0.5 ? 0 : 1)) % 3 : -1;
+      if (this.floodPair === this.floodSlot) this.floodPair = (this.floodSlot + 1) % 3;
+      this.floodHold = 0;
       this.kickWant = 1;
     } else if (a.bass > 0.55) {
       this.kickWant = Math.max(this.kickWant, 0.7 + a.bass * 0.3);
@@ -643,40 +773,53 @@ export class DancerScene {
     this.squashAmt += (1 - this.kick * 0.035 - this.bassSmooth * 0.02 - this.squashAmt) * (1 - Math.exp(-dt * 7));
 
     const meta = this.currentMeta();
-    const clipBpm = meta?.bpm ?? 120;
-    const songBpm = this.map?.bpm ?? (playing && a.bpm > 80 ? a.bpm : clipBpm);
-    const scale = playing ? songBpm / clipBpm : 0.52;
-    this.speed += (scale - this.speed) * 0.05;
+    const clipBpm = Math.max(80, meta?.bpm ?? 120);
+    const mapped = this.map && this.map.duration > 1;
+    const songBpm = mapped ? this.map!.bpm : playing && a.bpm > 80 ? a.bpm : 128;
+    const pump = THREE.MathUtils.clamp(a.energy * 0.5 + a.bass * 0.55 + (a.drop ? 0.3 : 0), 0, 1);
+    const feel = playing ? 0.78 + pump * 0.22 : 0.52;
+    const scale = (songBpm / clipBpm) * feel;
+    this.speed += (scale - this.speed) * 0.08;
     for (const action of this.actions) action.timeScale = this.speed;
     for (const echo of this.echoes) echo.timeScale = this.speed;
 
+    this.lastSong = songTime;
     this.held += dt;
     if (playing && a.beat) this.beats += 1;
-    if (!this.fadeFrom) {
-      if (playing && this.map) {
-        const prev = songTime - dt;
-        for (const cue of this.map.cues) {
-          if (cue.t > prev && cue.t <= songTime && this.held > 3.2) {
-            if (cue.kind === "phrase" && a.bass < 0.1) continue;
+    this.floodHold += dt;
+    if (this.floodHold > 0.5) {
+      this.floodSlot = (this.floodSlot + 1) % 3;
+      this.floodPair = Math.random() < 0.5 ? (this.floodSlot + 2) % 3 : -1;
+      this.floodHold = 0;
+    }
+
+    if (this.pending && !this.fadeFrom && playing && (a.beat || a.drop) && this.held >= 4) {
+      this.switchMove();
+    }
+
+    if (!this.fadeFrom && !this.pending) {
+      if (playing && this.map && this.map.cues.length) {
+        while (this.cueI < this.map.cues.length && this.map.cues[this.cueI]!.t <= songTime) {
+          const cue = this.map.cues[this.cueI]!;
+          this.cueI += 1;
+          if (this.held < 4) continue;
+          if (cue.kind === "drop" || cue.kind === "build") {
             this.switchMove();
             break;
           }
+          if ((cue.kind === "phrase" || cue.kind === "break") && this.held >= 4) {
+            this.pending = { reason: cue.kind };
+            break;
+          }
         }
-        if (!this.fadeFrom && this.held > 10) this.switchMove();
-      } else {
-        const holdLimit = playing ? this.untilHold : 14;
-        if (playing && a.drop && this.held > 6) this.switchMove();
-        else if (this.beats >= this.untilSwitch || this.held >= holdLimit) this.switchMove();
+      }
+      if (!this.fadeFrom && !this.pending && this.held > 8) {
+        this.pending = { reason: "maxHold" };
       }
       if (!this.fadeFrom) this.beginLoopBlend();
     }
     if (this.fadeFrom && this.action) {
       const from = this.fadeFrom;
-      const dur = from.getClip().duration;
-      if (from.time > dur - 0.02) {
-        from.time = dur - 0.02;
-        from.paused = true;
-      }
       this.fadeT += dt;
       const u = Math.min(1, this.fadeT / this.fadeDur);
       const s = u * u * u * (u * (u * 6 - 15) + 10);
@@ -701,28 +844,36 @@ export class DancerScene {
       this.action.setEffectiveWeight(1);
     }
     this.mixer?.update(dt);
+    if (this.hips) {
+      this.hips.getWorldPosition(this.aim);
+      const target = this.centerX - this.aim.x;
+      this.centerX += (target - this.centerX) * (1 - Math.exp(-dt * 6.5));
+      this.root.position.x = this.centerX;
+    }
+    this.root.position.y = this.bounceY;
     this.applyHits(a);
+    const wash = Math.max(this.kick, flash, a.drop ? 0.6 : 0);
     const glowFollow = 1 - Math.exp(-dt * 6);
-    const keyT = 22 + a.bass * 28 + this.kick * 18 + flash * 24;
-    const rimT = 16 + a.high * 16 + this.hatPulse * 14 + flash * 18;
-    this.keyGlow += (keyT - this.keyGlow) * (flash > 0.12 ? 0.85 : glowFollow);
-    this.rimGlow += (rimT - this.rimGlow) * (flash > 0.12 ? 0.82 : glowFollow);
-    this.key.color.copy(hueColor(hue, 1, 0.46));
-    this.rim.color.copy(hueColor(hue + 168, 1, 0.44));
-    this.strobe.color.copy(hueColor(hue + 32, 1, 0.48));
-    this.fill.color.copy(hueColor(hue + 210, 0.85, 0.32));
-    this.front.color.copy(hueColor(hue, 1, 0.42));
-    this.hemi.color.copy(hueColor(hue, 0.7, 0.28));
-    this.ambient.color.copy(hueColor(hue, 0.35, 0.16));
-    this.key.intensity = this.keyGlow;
-    this.rim.intensity = this.rimGlow;
-    this.strobe.intensity = 3 + flash * 12 + this.kick * 6;
-    this.fill.intensity = 0.08 + a.bass * 0.06;
-    this.front.intensity = 0.08 + flash * 0.15;
-    this.hemi.intensity = 0.1;
-    this.ambient.intensity = 0.06;
+    const keyT = 11 + a.bass * 10 + this.kick * 5 - wash * 7;
+    const rimT = 9 + a.high * 8 + this.hatPulse * 6 - wash * 3;
+    this.keyGlow += (keyT - this.keyGlow) * (wash > 0.2 ? 0.7 : glowFollow);
+    this.rimGlow += (rimT - this.rimGlow) * (wash > 0.2 ? 0.7 : glowFollow);
+    this.key.color.copy(hueColor(hue, 1, 0.38));
+    this.rim.color.copy(hueColor(hue + 168, 1, 0.36));
+    this.strobe.color.copy(hueColor(hue + 32, 1, 0.4));
+    this.fill.color.copy(hueColor(hue + 210, 0.9, 0.28));
+    this.front.color.copy(hueColor(hue, 1, 0.34));
+    this.hemi.color.copy(hueColor(hue, 0.65, 0.22));
+    this.ambient.color.copy(hueColor(hue, 0.4, 0.12));
+    this.key.intensity = Math.max(4, this.keyGlow);
+    this.rim.intensity = Math.max(3, this.rimGlow);
+    this.strobe.intensity = 0.6 + this.kick * 3.5;
+    this.fill.intensity = 0.04 + a.bass * 0.04;
+    this.front.intensity = 0.03;
+    this.hemi.intensity = 0.08;
+    this.ambient.intensity = 0.04;
     this.scene.environmentIntensity = 0.02;
-    this.renderer.toneMappingExposure = 0.92;
+    this.renderer.toneMappingExposure = 0.95;
     this.driveClub(hue, flash, a, dt);
     this.driveFloods(hue, flash, a);
     this.renderer.render(this.scene, this.camera);
@@ -765,7 +916,7 @@ export class DancerScene {
     this.pars.forEach((par, i) => {
       par.color.copy(hueColor(hue + i * 160, 1, 0.55));
       const pulse = i % 2 === 0 ? this.kick : this.hatPulse;
-      par.intensity = 2 + a.bass * 2 + pulse * 6 + flash * 5;
+      par.intensity = 1.2 + a.bass * 1.4 + pulse * 4 + flash * 3.5;
       par.position.set(i === 0 ? -0.4 : 0.4, chest + 1.35, 0.3);
     });
     this.laserBeams.forEach((beam, i) => {
@@ -777,7 +928,7 @@ export class DancerScene {
       pivot.rotation.z = Math.sin(this.t * 0.3 + i) * 0.08;
       const mat = beam.material as THREE.MeshBasicMaterial;
       mat.color.copy(hueColor(hue + i * 40, 1, 0.58));
-      mat.opacity = 0.12 + flash * 0.45 + (i === 1 ? this.kick : this.hatPulse) * 0.22;
+      mat.opacity = 0.06 + flash * 0.28 + (i === 1 ? this.kick : this.hatPulse) * 0.14;
     });
   }
 
@@ -819,9 +970,11 @@ export class DancerScene {
     const chest = this.bodyH * 0.52;
     this.floods.forEach((flood, i) => {
       flood.color.copy(hueColor(hue + i * 120, 1, 0.52));
-      const kickHit = i === this.floodSlot ? Math.max(this.kick, flash) : 0;
-      const hatHit = i === (this.floodSlot + 1) % 3 ? this.hatPulse : 0;
-      flood.intensity = 8 + kickHit * 72 + hatHit * 36;
+      const primary = i === this.floodSlot;
+      const pair = i === this.floodPair;
+      const on = primary || pair;
+      const kickHit = primary ? Math.max(this.kick, flash, a.drop ? 0.7 : 0) : pair ? flash * 0.55 : 0;
+      flood.intensity = on ? 5 + kickHit * 48 + this.hatPulse * (pair ? 18 : 8) : 1.4;
       flood.position.y = chest + 2.15;
       flood.target.position.set(0, chest * 0.85, 0);
     });

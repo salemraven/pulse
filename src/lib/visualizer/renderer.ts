@@ -51,6 +51,7 @@ export class VisualizerRenderer {
   private reduced = false;
   mode: VizMode = "auto";
   hideCenter = false;
+  backdrop = false;
 
   get palette() {
     return { hue: this.hue, flash: this.flash };
@@ -58,7 +59,7 @@ export class VisualizerRenderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
     if (!ctx) throw new Error("Canvas is unavailable.");
     this.ctx = ctx;
     for (let i = 0; i < 160; i++) this.spawnStar();
@@ -94,7 +95,7 @@ export class VisualizerRenderer {
       this.shake = this.reduced ? 0 : 10 + a.bass * 14;
       this.flash = 0.22 + a.bass * 0.28;
       this.burst(a);
-      this.floodSlot = (this.floodSlot + 1) % 3;
+      this.floodSlot = (this.floodSlot + 1 + (Math.random() < 0.35 ? 1 : 0)) % 3;
     }
     if (a.drop) {
       this.flash = 0.55;
@@ -106,9 +107,15 @@ export class VisualizerRenderer {
     this.smoothBars(freq, a);
 
     const ctx = this.ctx;
-    const fade = idle ? 0.18 : 0.1 + (1 - a.energy) * 0.08;
-    ctx.fillStyle = `rgba(5,5,8,${fade})`;
-    ctx.fillRect(0, 0, this.w, this.h);
+    if (this.backdrop) {
+      ctx.clearRect(0, 0, this.w, this.h);
+      ctx.fillStyle = `rgba(5,5,8,${idle ? 0.42 : 0.22 + (1 - a.energy) * 0.16})`;
+      ctx.fillRect(0, 0, this.w, this.h);
+    } else {
+      const fade = idle ? 0.18 : 0.1 + (1 - a.energy) * 0.08;
+      ctx.fillStyle = `rgba(5,5,8,${fade})`;
+      ctx.fillRect(0, 0, this.w, this.h);
+    }
 
     ctx.save();
     if (this.shake > 0.2) {
@@ -290,6 +297,8 @@ export class VisualizerRenderer {
     const n = this.bars.length;
     ctx.save();
     ctx.translate(cx, cy);
+    ctx.scale(1.65, 0.52);
+    ctx.rotate(0.18);
     ctx.rotate(this.rot);
     ctx.globalCompositeOperation = "lighter";
     for (let i = 0; i < n; i++) {
@@ -300,7 +309,7 @@ export class VisualizerRenderer {
       const y0 = Math.sin(ang) * radius;
       const x1 = Math.cos(ang) * (radius + len);
       const y1 = Math.sin(ang) * (radius + len);
-      ctx.strokeStyle = `hsla(${this.hue + (i / n) * 40 - 10}, 92%, ${58 + v * 28}%, ${0.35 + v * 0.55})`;
+      ctx.strokeStyle = `hsla(${this.hue + (i / n) * 40 - 10}, 92%, ${58 + v * 28}%, ${0.16 + v * 0.28})`;
       ctx.lineWidth = Math.max(2, (Math.PI * 2 * radius) / n - 1.4);
       ctx.lineCap = "round";
       ctx.beginPath();
@@ -524,7 +533,7 @@ export class VisualizerRenderer {
     if (!this.title) return;
     const ctx = this.ctx;
     const cx = this.w / 2;
-    const y = this.h * 0.46;
+    const y = this.h * 0.91;
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -550,7 +559,7 @@ export class VisualizerRenderer {
       Math.max(this.w, this.h) * 0.72,
     );
     g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, "rgba(4,4,7,0.72)");
+    g.addColorStop(1, this.backdrop ? "rgba(4,4,7,0.46)" : "rgba(4,4,7,0.72)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.w, this.h);
   }
