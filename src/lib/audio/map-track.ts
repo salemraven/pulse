@@ -1,8 +1,10 @@
 const TEMPOS = [100, 105, 110, 112, 115, 120, 122, 124, 126, 128, 130, 132, 135, 140, 145, 150, 160, 174];
 
+export type CueKind = "drop" | "phrase" | "break" | "build";
+
 export type DanceCue = {
   t: number;
-  kind: "drop" | "phrase";
+  kind: CueKind;
   energy: number;
 };
 
@@ -11,7 +13,22 @@ export type TrackMap = {
   duration: number;
   cues: DanceCue[];
   drops: number;
+  beats?: number[];
+  confidence?: number;
 };
+
+export function houseLoopMap(seconds = 64): TrackMap {
+  const bpm = 128;
+  const beat = 60 / bpm;
+  const cues: DanceCue[] = [];
+  const beats: number[] = [];
+  for (let t = 0; t < seconds; t += beat) beats.push(t);
+  for (let t = beat * 16; t < seconds; t += beat * 16) {
+    const isDrop = Math.round(t / (beat * 32)) * (beat * 32) === t;
+    cues.push({ t, kind: isDrop ? "drop" : "phrase", energy: isDrop ? 1 : 0.55 });
+  }
+  return { bpm, duration: seconds, cues, drops: cues.filter((c) => c.kind === "drop").length, beats, confidence: 1 };
+}
 
 function median(xs: number[]) {
   if (!xs.length) return 0;
@@ -138,5 +155,7 @@ export function mapTrack(buffer: AudioBuffer): TrackMap {
   }
   cues.sort((a, b) => a.t - b.t);
 
-  return { bpm, duration: buffer.duration, cues, drops: drops.length };
+  const beats: number[] = [];
+  for (let t = 0; t < buffer.duration; t += beat) beats.push(+t.toFixed(4));
+  return { bpm, duration: buffer.duration, cues, drops: drops.length, beats, confidence: iois.length > 12 ? 0.8 : 0.45 };
 }
