@@ -5,17 +5,23 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Analysis } from "@/lib/audio/types";
 import type { TrackMap } from "@/lib/audio/map-track";
 
-const MODEL_URL = "/models/michelle.glb?v=1";
-const PACK_URLS = ["/models/dances.glb?v=bind"];
-const FBX_PACKS = [
-  { url: "/models/groove.fbx?v=1", name: "Groove" },
-  { url: "/models/running-man.fbx?v=1", name: "RunningMan" },
-  { url: "/models/swing.fbx?v=1", name: "Swing" },
-  { url: "/models/rumba.fbx?v=1", name: "Rumba" },
-  { url: "/models/shuffle.fbx?v=1", name: "Shuffle" },
-  { url: "/models/slide.fbx?v=1", name: "Slide" },
-];
 const HIP_FIX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+
+function asset(path: string) {
+  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+const MODEL_URL = asset("/models/michelle.glb?v=1");
+const PACK_URLS = [asset("/models/dances.glb?v=bind")];
+const FBX_PACKS = [
+  { url: asset("/models/groove.fbx?v=1"), name: "Groove" },
+  { url: asset("/models/running-man.fbx?v=1"), name: "RunningMan" },
+  { url: asset("/models/swing.fbx?v=1"), name: "Swing" },
+  { url: asset("/models/rumba.fbx?v=1"), name: "Rumba" },
+  { url: asset("/models/shuffle.fbx?v=1"), name: "Shuffle" },
+  { url: asset("/models/slide.fbx?v=1"), name: "Slide" },
+];
 
 export type DancerStatus = "loading" | "ready" | "error";
 
