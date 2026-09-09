@@ -949,7 +949,7 @@ export class DancerScene {
       const light = new THREE.PointLight(0x88f0ff, 0.8, 5, 2);
       group.add(emitter, light);
       const beams: LaserBeam[] = [];
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 2; i++) {
         const core = new THREE.Mesh(coreGeo, laserMat(0.8, 0xffffff));
         const glow = new THREE.Mesh(glowGeo, laserMat(0.22, 0x66e8ff));
         const halo = new THREE.Mesh(haloGeo, laserMat(0.07, 0x66e8ff));
@@ -976,7 +976,7 @@ export class DancerScene {
       const pan = Math.sin(t * scan * 0.42 + head.side * 0.4) * 0.95;
       into.set(cx + pan + i * 0.04 * head.side, chest * (0.25 + i * 0.22), 0.15 + Math.sin(b) * 0.12);
     } else if (pat === 3) {
-      const ang = (i / 4) * Math.PI * 2 + t * 0.35 + (head.side < 0 ? 0 : 0.4);
+      const ang = (i / 2) * Math.PI + t * 0.35 + (head.side < 0 ? 0 : 0.4);
       into.set(cx + Math.cos(ang) * 0.62, 0.12 + (i % 2) * chest * 0.55, Math.sin(ang) * 0.42);
     } else if (pat === 4) {
       into.set(cx - head.side * 0.15, chest * (0.35 + 0.4 * Math.sin(a)), 0.35 + Math.sin(b) * 0.2);

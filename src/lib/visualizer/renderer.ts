@@ -488,7 +488,7 @@ export class VisualizerRenderer {
     ];
 
     for (const head of heads) {
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 2; i++) {
         const tx = this.laserAimX(head.side, i, t, cx);
         const ty = this.laserAimY(i, t, cy);
         this.strokeLaser(ctx, head.x, head.y, tx, ty, head.hue + i * 6, live * (0.75 + ((i + (a.beat ? 1 : 0)) % 2) * 0.25));
@@ -510,7 +510,7 @@ export class VisualizerRenderer {
     if (pat === 0) return cx + Math.cos(t + i * 1.1 + side) * this.w * 0.18;
     if (pat === 1) return cx + Math.sin(t * 0.85 + i * 0.7) * this.w * 0.32 * side;
     if (pat === 2) return cx + Math.sin(t * 0.4) * this.w * 0.28 + i * 18 * side;
-    if (pat === 3) return cx + Math.cos((i / 4) * Math.PI * 2 + t * 0.3) * this.w * 0.16;
+    if (pat === 3) return cx + Math.cos((i / 2) * Math.PI + t * 0.3) * this.w * 0.16;
     return cx + Math.sin(t * 1.8 + i * 2.2) * this.w * 0.3;
   }
 
@@ -519,7 +519,7 @@ export class VisualizerRenderer {
     if (pat === 0) return cy + Math.sin(t * 1.15 + i) * this.h * 0.08;
     if (pat === 1) return this.h * 0.78 + Math.sin(t + i) * 18;
     if (pat === 2) return this.h * (0.28 + i * 0.12);
-    if (pat === 3) return cy + Math.sin((i / 4) * Math.PI * 2 + t * 0.3) * this.h * 0.12;
+    if (pat === 3) return cy + Math.sin((i / 2) * Math.PI + t * 0.3) * this.h * 0.12;
     return cy + Math.sin(t * 2.1 + i * 1.4) * this.h * 0.16;
   }
 
