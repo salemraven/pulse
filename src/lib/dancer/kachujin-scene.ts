@@ -19,6 +19,24 @@ const HIP_FIX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 
 
 export type DancerStatus = "loading" | "ready" | "error";
 
+type LaserBeam = {
+  core: THREE.Mesh;
+  glow: THREE.Mesh;
+  halo: THREE.Mesh;
+  kiss: THREE.Mesh;
+  tx: number;
+  ty: number;
+  tz: number;
+};
+
+type LaserHead = {
+  group: THREE.Group;
+  emitter: THREE.Mesh;
+  light: THREE.PointLight;
+  beams: LaserBeam[];
+  side: number;
+};
+
 const attached = new WeakMap<HTMLCanvasElement, DancerScene>();
 
 export function attachDancer(canvas: HTMLCanvasElement, onStatus?: (status: DancerStatus, detail?: string) => void) {
@@ -37,6 +55,19 @@ function hueColor(hue: number, s = 0.75, l = 0.55) {
   const c = new THREE.Color();
   c.setHSL((((hue % 360) + 360) % 360) / 360, s, l);
   return c;
+}
+
+function laserMat(opacity: number, color = 0xffffff) {
+  return new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
 }
 
 function makeQuatsContinuous(clip: THREE.AnimationClip) {
@@ -329,7 +360,15 @@ export class DancerScene {
   private strobe = new THREE.PointLight(0x88f0ff, 0, 9);
   private floods: THREE.SpotLight[] = [];
   private pars: THREE.PointLight[] = [];
-  private laserBeams: THREE.Mesh[] = [];
+  private lasers: LaserHead[] = [];
+  private laserPat = 0;
+  private laserPatHold = 0;
+  private laserShutter = 0.4;
+  private laserY = new THREE.Vector3(0, 1, 0);
+  private laserDir = new THREE.Vector3();
+  private laserFrom = new THREE.Vector3();
+  private laserTo = new THREE.Vector3();
+  private laserHit = new THREE.Vector3();
   private club = new THREE.Group();
   private t = 0;
   private kick = 0;
@@ -890,23 +929,106 @@ export class DancerScene {
       this.pars.push(par);
       this.club.add(par);
     }
-    const geo = new THREE.CylinderGeometry(0.018, 0.003, 5.4, 8, 1, true);
-    geo.translate(0, -2.7, 0);
-    for (let i = 0; i < 3; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0x88f0ff,
-        transparent: true,
-        opacity: 0.28,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const beam = new THREE.Mesh(geo, mat);
-      const pivot = new THREE.Group();
-      pivot.position.set(0, 3.15, 0);
-      pivot.add(beam);
-      this.laserBeams.push(beam);
-      this.club.add(pivot);
+    this.buildLasers();
+  }
+
+  private buildLasers() {
+    const LEN = 8;
+    const coreGeo = new THREE.CylinderGeometry(0.0036, 0.0014, LEN, 6, 1, true);
+    const glowGeo = new THREE.CylinderGeometry(0.014, 0.007, LEN, 8, 1, true);
+    const haloGeo = new THREE.CylinderGeometry(0.038, 0.02, LEN, 8, 1, true);
+    coreGeo.translate(0, -LEN / 2, 0);
+    glowGeo.translate(0, -LEN / 2, 0);
+    haloGeo.translate(0, -LEN / 2, 0);
+    const kissGeo = new THREE.SphereGeometry(0.045, 10, 8);
+    const emitGeo = new THREE.SphereGeometry(0.028, 10, 8);
+
+    for (const side of [-1, 1]) {
+      const group = new THREE.Group();
+      const emitter = new THREE.Mesh(emitGeo, laserMat(0.95, 0xffffff));
+      const light = new THREE.PointLight(0x88f0ff, 0.8, 5, 2);
+      group.add(emitter, light);
+      const beams: LaserBeam[] = [];
+      for (let i = 0; i < 4; i++) {
+        const core = new THREE.Mesh(coreGeo, laserMat(0.8, 0xffffff));
+        const glow = new THREE.Mesh(glowGeo, laserMat(0.22, 0x66e8ff));
+        const halo = new THREE.Mesh(haloGeo, laserMat(0.07, 0x66e8ff));
+        const kiss = new THREE.Mesh(kissGeo, laserMat(0.0, 0xffffff));
+        this.club.add(core, glow, halo, kiss);
+        beams.push({ core, glow, halo, kiss, tx: 0, ty: 0.8, tz: 0 });
+      }
+      this.club.add(group);
+      this.lasers.push({ group, emitter, light, beams, side });
+    }
+  }
+
+  private laserTarget(head: LaserHead, i: number, chest: number, t: number, scan: number, into: THREE.Vector3) {
+    const pat = this.laserPat;
+    const cx = this.centerX;
+    const a = t * scan + i * 1.05 + head.side * 0.7;
+    const b = t * scan * 0.73 + i * 0.8;
+    if (pat === 0) {
+      const r = 0.55 + Math.sin(b) * 0.12;
+      into.set(cx + Math.cos(a) * r, chest + Math.sin(b * 1.3) * 0.38, Math.sin(a) * 0.28);
+    } else if (pat === 1) {
+      into.set(cx + Math.sin(a) * 1.05, 0.04 + Math.abs(Math.sin(b)) * 0.08, Math.cos(a * 0.7) * 0.55);
+    } else if (pat === 2) {
+      const pan = Math.sin(t * scan * 0.42 + head.side * 0.4) * 0.95;
+      into.set(cx + pan + i * 0.04 * head.side, chest * (0.25 + i * 0.22), 0.15 + Math.sin(b) * 0.12);
+    } else if (pat === 3) {
+      const ang = (i / 4) * Math.PI * 2 + t * 0.35 + (head.side < 0 ? 0 : 0.4);
+      into.set(cx + Math.cos(ang) * 0.62, 0.12 + (i % 2) * chest * 0.55, Math.sin(ang) * 0.42);
+    } else if (pat === 4) {
+      into.set(cx - head.side * 0.15, chest * (0.35 + 0.4 * Math.sin(a)), 0.35 + Math.sin(b) * 0.2);
+    } else {
+      into.set(
+        cx + Math.sin(a * 1.7) * 0.85,
+        chest + Math.sin(b * 2.1) * 0.55,
+        Math.sin(a * 1.1 + b) * 0.45,
+      );
+    }
+  }
+
+  private aimBeam(beam: LaserBeam, from: THREE.Vector3, to: THREE.Vector3, live: number, color: THREE.Color) {
+    this.laserDir.copy(to).sub(from);
+    const len = Math.max(0.6, this.laserDir.length());
+    this.laserDir.multiplyScalar(1 / len);
+    const q = beam.core.quaternion;
+    if (this.laserDir.y < -0.995) q.setFromAxisAngle(this.ax, Math.PI);
+    else q.setFromUnitVectors(this.laserY, this.laserDir);
+    const sy = len / 8;
+    for (const mesh of [beam.core, beam.glow, beam.halo]) {
+      mesh.position.copy(from);
+      mesh.quaternion.copy(q);
+      mesh.scale.set(1, sy, 1);
+      mesh.visible = live > 0.04;
+    }
+    const coreMat = beam.core.material as THREE.MeshBasicMaterial;
+    const glowMat = beam.glow.material as THREE.MeshBasicMaterial;
+    const haloMat = beam.halo.material as THREE.MeshBasicMaterial;
+    coreMat.color.setRGB(0.92, 0.97, 1);
+    glowMat.color.copy(color);
+    haloMat.color.copy(color);
+    coreMat.opacity = 0.55 * live;
+    glowMat.opacity = 0.2 * live;
+    haloMat.opacity = 0.07 * live;
+
+    const hips = this.hips;
+    if (hips) {
+      hips.getWorldPosition(this.aim);
+      this.laserHit.copy(this.aim).sub(from);
+      const tHit = THREE.MathUtils.clamp(this.laserHit.dot(this.laserDir), 0.25, len * 0.85);
+      beam.kiss.position.copy(from).addScaledVector(this.laserDir, tHit);
+      const dist = beam.kiss.position.distanceTo(this.aim);
+      const near = dist < 0.55 ? 1 - dist / 0.55 : 0;
+      const kissMat = beam.kiss.material as THREE.MeshBasicMaterial;
+      kissMat.color.copy(color);
+      kissMat.opacity = live * (0.08 + near * 0.7);
+      const s = 0.35 + near * 1.4 + live * 0.3;
+      beam.kiss.scale.setScalar(s);
+      beam.kiss.visible = kissMat.opacity > 0.03;
+    } else {
+      beam.kiss.visible = false;
     }
   }
 
@@ -919,16 +1041,49 @@ export class DancerScene {
       par.intensity = 1.2 + a.bass * 1.4 + pulse * 4 + flash * 3.5;
       par.position.set(i === 0 ? -0.4 : 0.4, chest + 1.35, 0.3);
     });
-    this.laserBeams.forEach((beam, i) => {
-      const pivot = beam.parent;
-      if (!pivot) return;
-      pivot.position.set(0, chest + 1.7, 0);
-      pivot.rotation.y = this.t * 0.18 + i * 2.09;
-      pivot.rotation.x = 0.55 + Math.sin(this.t * 0.5 + i) * 0.12 + this.kick * 0.1;
-      pivot.rotation.z = Math.sin(this.t * 0.3 + i) * 0.08;
-      const mat = beam.material as THREE.MeshBasicMaterial;
-      mat.color.copy(hueColor(hue + i * 40, 1, 0.58));
-      mat.opacity = 0.06 + flash * 0.28 + (i === 1 ? this.kick : this.hatPulse) * 0.14;
+    this.driveLasers(hue, flash, a, dt, chest);
+  }
+
+  private driveLasers(hue: number, flash: number, a: Analysis, dt: number, chest: number) {
+    this.laserPatHold += dt;
+    if ((a.drop && this.laserPatHold > 0.9) || (a.beat && this.laserPatHold > 6.5)) {
+      this.laserPat = (this.laserPat + 1 + (a.drop ? Math.floor(Math.random() * 2) : 0)) % 6;
+      this.laserPatHold = 0;
+    }
+    const pump = THREE.MathUtils.clamp(a.energy * 0.55 + a.bass * 0.45 + (a.drop ? 0.35 : 0), 0, 1);
+    const wantShut = a.drop ? 1 : this.hatPulse > 0.55 ? 1 : 0.12 + pump * 0.78;
+    const shutFollow = a.hat || a.drop ? 0.92 : 1 - Math.exp(-dt * 7);
+    this.laserShutter += (wantShut - this.laserShutter) * shutFollow;
+    if (a.beat && !a.drop) this.laserShutter *= 0.35;
+    const scan = 0.45 + pump * 2.1 + (this.laserPat === 5 ? 1.1 : 0);
+    const liveBase = this.laserShutter * (0.35 + pump * 0.65 + flash * 0.35);
+    const follow = a.drop ? 1 : 1 - Math.exp(-dt * (11 + pump * 8));
+
+    this.lasers.forEach((head) => {
+      head.group.position.set(head.side * 1.22, chest + 1.78, -0.42);
+      const headHue = hue + (head.side < 0 ? 0 : 155);
+      const col = hueColor(headHue, 1, 0.58);
+      head.light.color.copy(col);
+      head.light.intensity = 0.4 + liveBase * 3.5 + this.kick * 2;
+      const emitMat = head.emitter.material as THREE.MeshBasicMaterial;
+      emitMat.color.copy(col);
+      emitMat.opacity = 0.35 + liveBase * 0.65;
+      head.emitter.scale.setScalar(0.7 + liveBase * 0.8 + this.kick * 0.4);
+
+      head.beams.forEach((beam, i) => {
+        this.laserFrom.copy(head.group.position);
+        this.laserTarget(head, i, chest, this.t, scan, this.laserTo);
+        beam.tx += (this.laserTo.x - beam.tx) * follow;
+        beam.ty += (this.laserTo.y - beam.ty) * follow;
+        beam.tz += (this.laserTo.z - beam.tz) * follow;
+        this.laserTo.set(beam.tx, beam.ty, beam.tz);
+        const live = liveBase * (0.82 + (i % 2 === 0 ? this.kick : this.hatPulse) * 0.18);
+        this.laserDir.copy(this.laserTo).sub(this.laserFrom);
+        if (this.laserDir.lengthSq() < 0.01) this.laserDir.set(0, -1, 0.2);
+        this.laserDir.normalize();
+        this.laserTo.copy(this.laserFrom).addScaledVector(this.laserDir, 8.5);
+        this.aimBeam(beam, this.laserFrom, this.laserTo, live, col);
+      });
     });
   }
 

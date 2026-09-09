@@ -41,6 +41,9 @@ export class VisualizerRenderer {
   private flash = 0;
   private hue = 186;
   private floodSlot = 0;
+  private laserPat = 0;
+  private laserPatT = 0;
+  private laserShut = 0.45;
   private bars = new Float32Array(BAR_COUNT);
   private peaks = new Float32Array(BAR_COUNT);
   private particles: Particle[] = [];
@@ -90,6 +93,14 @@ export class VisualizerRenderer {
     this.t += dt;
     this.rot += dt * (0.12 + a.bass * 0.9);
     this.hue = 186 + a.high * 28 + Math.sin(this.t * 0.15) * 8;
+    this.laserPatT += dt;
+    const wantShut = a.drop ? 1 : a.hat ? 1 : 0.18 + a.energy * 0.7;
+    this.laserShut += (wantShut - this.laserShut) * (a.hat || a.drop ? 0.9 : 1 - Math.exp(-dt * 6));
+    if (a.beat && !a.drop) this.laserShut *= 0.4;
+    if ((a.drop && this.laserPatT > 0.8) || (a.beat && this.laserPatT > 6)) {
+      this.laserPat = (this.laserPat + 1) % 5;
+      this.laserPatT = 0;
+    }
 
     if (a.beat) {
       this.shake = this.reduced ? 0 : 10 + a.bass * 14;
@@ -461,27 +472,99 @@ export class VisualizerRenderer {
   private drawLasers(a: Analysis) {
     const ctx = this.ctx;
     const cx = this.w / 2;
-    const cy = this.h * 0.5;
-    const n = 4;
+    const cy = this.h * 0.46;
+    const scan = 0.55 + a.energy * 2.2 + (this.laserPat === 4 ? 1.2 : 0);
+    const t = this.t * scan;
+    const live = this.laserShut * (0.45 + a.energy * 0.55 + this.flash * 0.4);
+    if (live < 0.04) return;
+
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < n; i++) {
-      const side = i < 2 ? -1 : 1;
-      const k = i % 2;
-      const ox = cx + side * (this.w * 0.16 + k * this.w * 0.1);
-      const oy = -20;
-      const sway = Math.sin(this.t * (0.5 + k * 0.12) + i) * this.w * 0.08;
-      const tx = cx + sway * 0.25;
-      const ty = cy + 40 + Math.sin(this.t * 0.7 + i) * 16;
-      const alpha = 0.06 + a.energy * 0.1 + this.flash * 0.4 + (i % 2 ? a.high : a.bass) * 0.1;
-      ctx.strokeStyle = `hsla(${this.hue + i * 22}, 100%, 58%, ${alpha})`;
-      ctx.lineWidth = 1.4 + this.flash * 6 + a.bass * 2;
+    ctx.lineCap = "round";
+
+    const heads = [
+      { x: this.w * 0.14, y: -6, hue: this.hue, side: -1 },
+      { x: this.w * 0.86, y: -6, hue: this.hue + 155, side: 1 },
+    ];
+
+    for (const head of heads) {
+      for (let i = 0; i < 4; i++) {
+        const tx = this.laserAimX(head.side, i, t, cx);
+        const ty = this.laserAimY(i, t, cy);
+        this.strokeLaser(ctx, head.x, head.y, tx, ty, head.hue + i * 6, live * (0.75 + ((i + (a.beat ? 1 : 0)) % 2) * 0.25));
+      }
+      const bloom = ctx.createRadialGradient(head.x, 10, 0, head.x, 12, 48);
+      bloom.addColorStop(0, `hsla(${head.hue}, 100%, 85%, ${0.18 + live * 0.45})`);
+      bloom.addColorStop(0.4, `hsla(${head.hue}, 100%, 60%, ${0.08 + live * 0.12})`);
+      bloom.addColorStop(1, `hsla(${head.hue}, 100%, 50%, 0)`);
+      ctx.fillStyle = bloom;
       ctx.beginPath();
-      ctx.moveTo(ox, oy);
-      ctx.lineTo(tx, ty);
-      ctx.stroke();
+      ctx.arc(head.x, 12, 48, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
+  }
+
+  private laserAimX(side: number, i: number, t: number, cx: number) {
+    const pat = this.laserPat;
+    if (pat === 0) return cx + Math.cos(t + i * 1.1 + side) * this.w * 0.18;
+    if (pat === 1) return cx + Math.sin(t * 0.85 + i * 0.7) * this.w * 0.32 * side;
+    if (pat === 2) return cx + Math.sin(t * 0.4) * this.w * 0.28 + i * 18 * side;
+    if (pat === 3) return cx + Math.cos((i / 4) * Math.PI * 2 + t * 0.3) * this.w * 0.16;
+    return cx + Math.sin(t * 1.8 + i * 2.2) * this.w * 0.3;
+  }
+
+  private laserAimY(i: number, t: number, cy: number) {
+    const pat = this.laserPat;
+    if (pat === 0) return cy + Math.sin(t * 1.15 + i) * this.h * 0.08;
+    if (pat === 1) return this.h * 0.78 + Math.sin(t + i) * 18;
+    if (pat === 2) return this.h * (0.28 + i * 0.12);
+    if (pat === 3) return cy + Math.sin((i / 4) * Math.PI * 2 + t * 0.3) * this.h * 0.12;
+    return cy + Math.sin(t * 2.1 + i * 1.4) * this.h * 0.16;
+  }
+
+  private strokeLaser(
+    ctx: CanvasRenderingContext2D,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    hue: number,
+    live: number,
+  ) {
+    if (live < 0.05) return;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 58%, ${0.07 * live})`;
+    ctx.lineWidth = 16 + this.flash * 10;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+
+    ctx.strokeStyle = `hsla(${hue}, 100%, 62%, ${0.28 * live})`;
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+
+    ctx.strokeStyle = `hsla(${hue}, 100%, 92%, ${0.72 * live})`;
+    ctx.lineWidth = 1.15;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    for (let k = 1; k <= 5; k++) {
+      const u = k / 6;
+      const px = x0 + dx * u + Math.sin(this.t * 9 + k * 2 + hue) * 1.2;
+      const py = y0 + dy * u;
+      ctx.fillStyle = `hsla(${hue}, 100%, 88%, ${0.08 * live})`;
+      ctx.beginPath();
+      ctx.arc(px, py, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   private burst(a: Analysis, extra = 28) {
