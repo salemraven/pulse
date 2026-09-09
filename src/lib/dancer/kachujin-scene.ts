@@ -670,33 +670,35 @@ export class DancerScene {
     const dur = this.action.getClip().duration;
     if (dur < 0.75) {
       this.action.setLoop(THREE.LoopRepeat, Infinity);
+      this.action.clampWhenFinished = false;
       return;
     }
     const rate = Math.max(0.35, Math.abs(this.action.timeScale) || this.speed);
     const remaining = (dur - this.action.time) / rate;
-    if (remaining > Math.min(1.15, dur * 0.4)) return;
-    this.action.setLoop(THREE.LoopOnce, 1);
-    this.action.clampWhenFinished = true;
-    if (this.action.time > dur - 0.04) this.action.time = dur - 0.04;
-    if (this.actions.length > 1 && !this.pending && this.held >= 4) {
-      this.pending = { reason: "loopEnd" };
+    if (remaining > Math.min(1.25, dur * 0.42)) return;
+    if (this.actions.length > 1 && this.held >= 4 && !this.pending) {
+      this.switchMove();
       return;
     }
     const echo = this.echoes[this.cursor];
     if (!echo || echo === this.action) return;
+    const prev = this.action;
+    prev.clampWhenFinished = true;
+    prev.setLoop(THREE.LoopOnce, 1);
     echo.enabled = true;
     echo.paused = false;
     echo.clampWhenFinished = false;
     echo.setLoop(THREE.LoopRepeat, Infinity);
-    echo.time = /swing/i.test(echo.getClip().name) ? 0.22 : 0.12;
+    const minT = /swing/i.test(echo.getClip().name) ? 0.22 : 0.08;
+    echo.time = minT;
     echo.setEffectiveTimeScale(this.speed);
     echo.setEffectiveWeight(0);
     if (!echo.isRunning()) echo.play();
-    this.fadeFrom = this.action;
+    this.fadeFrom = prev;
     this.fadeT = 0;
-    this.fadeDur = Math.min(1.15, Math.max(0.65, remaining * 0.88));
+    this.fadeDur = Math.min(1.2, Math.max(0.7, remaining * 0.82));
     this.action = echo;
-    this.echoes[this.cursor] = this.fadeFrom;
+    this.echoes[this.cursor] = prev;
     this.actions[this.cursor] = echo;
   }
 
@@ -723,7 +725,11 @@ export class DancerScene {
     const pick = this.actions[this.cursor];
     if (!pick || pick === this.action || isTPose(pick.getClip())) return;
     const prev = this.action;
-    const keep = pick.time;
+    const durPick = Math.max(pick.getClip().duration, 0.1);
+    const minT = /swing/i.test(pick.getClip().name) ? 0.22 : 0.08;
+    let t = pick.time;
+    if (!Number.isFinite(t) || t < minT) t = minT;
+    else if (t > durPick - 0.3) t = minT + ((t - minT) % Math.max(0.2, durPick - minT - 0.3));
     pick.enabled = true;
     pick.clampWhenFinished = false;
     pick.setLoop(THREE.LoopRepeat, Infinity);
@@ -731,21 +737,17 @@ export class DancerScene {
     pick.setEffectiveWeight(0);
     if (!pick.isRunning()) pick.play();
     pick.paused = false;
-    const durPick = Math.max(pick.getClip().duration, 0.1);
-    const minT = /swing/i.test(pick.getClip().name) ? 0.22 : 0.08;
-    let t = keep;
-    if (t < minT || t > durPick - 0.25) {
-      t = this.meta[this.cursor]?.plants.find((p) => p >= minT) ?? minT;
-    }
     pick.time = t;
     prev.enabled = true;
     prev.paused = false;
-    prev.clampWhenFinished = false;
-    prev.setLoop(THREE.LoopRepeat, Infinity);
+    prev.clampWhenFinished = true;
+    prev.setLoop(THREE.LoopOnce, 1);
     prev.setEffectiveWeight(1);
+    const rate = Math.max(0.35, Math.abs(prev.timeScale) || this.speed);
+    const remaining = (prev.getClip().duration - prev.time) / rate;
     this.fadeFrom = prev;
     this.fadeT = 0;
-    this.fadeDur = 1.15;
+    this.fadeDur = remaining < 1.4 ? Math.min(1.2, Math.max(0.75, remaining * 0.8)) : 1.35;
     this.action = pick;
     this.clipLabel = prettyClip(pick.getClip().name);
     this.beats = 0;
@@ -771,7 +773,7 @@ export class DancerScene {
   }
 
   private applyHits(a: Analysis) {
-    const fade = this.fadeFrom ? 0.4 : 1;
+    const fade = this.fadeFrom ? 0.12 : 1;
     const k = this.kick * fade;
     const h = this.hatPulse * fade;
     if (this.spine) this.spine.rotateOnAxis(this.ax, k * 0.05);
@@ -865,6 +867,7 @@ export class DancerScene {
       this.action.enabled = true;
       this.action.paused = false;
       from.enabled = true;
+      from.paused = false;
       this.action.setEffectiveWeight(s);
       from.setEffectiveWeight(1 - s);
       for (const other of [...this.actions, ...this.echoes]) {
@@ -877,6 +880,8 @@ export class DancerScene {
         this.action.setEffectiveWeight(1);
         from.setEffectiveWeight(0);
         from.paused = true;
+        from.clampWhenFinished = false;
+        from.setLoop(THREE.LoopRepeat, Infinity);
         this.fadeFrom = null;
       }
     } else if (this.action) {
@@ -886,7 +891,8 @@ export class DancerScene {
     if (this.hips) {
       this.hips.getWorldPosition(this.aim);
       const target = this.centerX - this.aim.x;
-      this.centerX += (target - this.centerX) * (1 - Math.exp(-dt * 6.5));
+      const k = this.fadeFrom ? 2.1 : 6.5;
+      this.centerX += (target - this.centerX) * (1 - Math.exp(-dt * k));
       this.root.position.x = this.centerX;
     }
     this.root.position.y = this.bounceY;
