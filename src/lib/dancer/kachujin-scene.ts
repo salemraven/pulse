@@ -403,6 +403,7 @@ export class DancerScene {
   private map: TrackMap | null = null;
   private queued = 0;
   private pending: { reason: string } | null = null;
+  private pendingT = 0;
   private cueI = 0;
   private lastSong = 0;
   private centerX = 0;
@@ -723,7 +724,11 @@ export class DancerScene {
     if (this.fadeFrom) return;
     this.cursor = this.nextIndex();
     const pick = this.actions[this.cursor];
-    if (!pick || pick === this.action || isTPose(pick.getClip())) return;
+    if (!pick || pick === this.action || isTPose(pick.getClip())) {
+      this.cursor = this.actions.indexOf(this.action);
+      if (this.cursor < 0) this.cursor = 0;
+      return;
+    }
     const prev = this.action;
     const durPick = Math.max(pick.getClip().duration, 0.1);
     const minT = /swing/i.test(pick.getClip().name) ? 0.22 : 0.08;
@@ -752,8 +757,8 @@ export class DancerScene {
     this.clipLabel = prettyClip(pick.getClip().name);
     this.beats = 0;
     this.held = 0;
-    this.queued = 0;
     this.pending = null;
+    this.pendingT = 0;
     this.untilSwitch = 16 + Math.floor(Math.random() * 4);
     this.untilHold = 8;
   }
@@ -762,6 +767,7 @@ export class DancerScene {
     this.map = map;
     this.cueI = 0;
     this.pending = null;
+    this.pendingT = 0;
     if (map && map.duration > 1) {
       this.held = 0;
       this.beats = 0;
@@ -826,6 +832,7 @@ export class DancerScene {
 
     this.lastSong = songTime;
     this.held += dt;
+    if (this.pending) this.pendingT += dt;
     if (playing && a.beat) this.beats += 1;
     this.floodHold += dt;
     if (this.floodHold > 0.5) {
@@ -834,8 +841,8 @@ export class DancerScene {
       this.floodHold = 0;
     }
 
-    if (this.pending && !this.fadeFrom && playing && (a.beat || a.drop) && this.held >= 4) {
-      this.switchMove();
+    if (this.pending && !this.fadeFrom && this.held >= 4) {
+      if (!playing || a.beat || a.drop || this.pendingT > 0.7) this.switchMove();
     }
 
     if (!this.fadeFrom && !this.pending) {
@@ -850,15 +857,16 @@ export class DancerScene {
           }
           if ((cue.kind === "phrase" || cue.kind === "break") && this.held >= 4) {
             this.pending = { reason: cue.kind };
+            this.pendingT = 0;
             break;
           }
         }
       }
       if (!this.fadeFrom && !this.pending && this.held > 8) {
-        this.pending = { reason: "maxHold" };
+        this.switchMove();
       }
-      if (!this.fadeFrom) this.beginLoopBlend();
     }
+    if (!this.fadeFrom) this.beginLoopBlend();
     if (this.fadeFrom && this.action) {
       const from = this.fadeFrom;
       this.fadeT += dt;
