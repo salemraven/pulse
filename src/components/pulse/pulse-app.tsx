@@ -6,7 +6,6 @@ import {
   Play,
   SkipBack,
   SkipForward,
-  Upload,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -20,13 +19,6 @@ import { attachDancer, type DancerStatus } from "@/lib/dancer/kachujin-scene";
 import { usePulse } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { cn, formatTime } from "@/lib/utils";
-
-const DEMO_TRACK: Track = {
-  id: "demo",
-  title: "Warehouse Loop",
-  artist: "PULSE",
-  source: "demo",
-};
 
 function isAudioFile(file: File) {
   if (file.type.startsWith("audio/")) return true;
@@ -44,7 +36,6 @@ export function PulseApp() {
   const headerRef = useRef<HTMLElement>(null);
   const footerRef = useRef<HTMLElement>(null);
   const landingRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const seekRef = useRef<HTMLDivElement>(null);
   const seekFillRef = useRef<HTMLDivElement>(null);
   const timeLabelRef = useRef<HTMLSpanElement>(null);
@@ -372,24 +363,6 @@ export function PulseApp() {
     [playLibrary],
   );
 
-  const playDemo = useCallback(() => {
-    const engine = getEngine();
-    engine.unlock();
-    engine.playDemo();
-    dancerRef.current?.setMap(engine.trackMap);
-    usePulse.getState().set({
-      track: DEMO_TRACK,
-      playing: true,
-      error: null,
-      chrome: true,
-      mapping: false,
-      mapLabel: "128 BPM · house loop",
-      playlistIndex: null,
-    });
-    vizRef.current?.setTrack(DEMO_TRACK.title, DEMO_TRACK.artist);
-    setDuration(0);
-  }, []);
-
   const loadBackdrop = useCallback((file: File) => {
     if (backdropUrlRef.current) URL.revokeObjectURL(backdropUrlRef.current);
     const url = URL.createObjectURL(file);
@@ -586,24 +559,12 @@ export function PulseApp() {
               Drop a track. Watch the room move.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted">
-              Play the ravenbloodrain set, drop your own MP3, or use the house loop.
+              Play the ravenbloodrain set, or drop an MP3 or JPG onto the room.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Button onClick={() => void playLibrary(0)} className="h-12 rounded-lg px-5">
                 <Play className="size-4 translate-x-px" />
-                Play library
-              </Button>
-              <Button variant="outline" className="h-12 rounded-lg px-5" onClick={playDemo}>
-                <Play className="size-4 translate-x-px" />
-                House loop
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12 rounded-lg px-5"
-                onClick={() => fileRef.current?.click()}
-              >
-                <Upload className="size-4" />
-                Choose file
+                Play
               </Button>
             </div>
             {error ? <p className="mt-4 text-sm text-muted">{error}</p> : null}
@@ -759,14 +720,6 @@ export function PulseApp() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                onClick={() => fileRef.current?.click()}
-                aria-label="Open audio file"
-              >
-                <Upload className="size-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
                 onClick={() => void toggleFullscreen()}
                 aria-label={isFs ? "Exit fullscreen" : "Enter fullscreen"}
               >
@@ -784,18 +737,6 @@ export function PulseApp() {
           <p className="font-display text-xl font-semibold text-fg">Drop a track or a photo</p>
         </div>
       ) : null}
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="audio/*,image/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.jpg,.jpeg,.png,.webp"
-        className="hidden"
-        onChange={(e) => {
-          const files = e.target.files;
-          if (files?.length) loadDropped(files);
-          e.target.value = "";
-        }}
-      />
     </div>
   );
 }
