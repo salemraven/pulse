@@ -1,0 +1,10 @@
+{
+  "name": "PULSE",
+  "short_name": "PULSE",
+  "start_url": "/pulse/",
+  "scope": "/pulse/",
+  "display": "standalone",
+  "background_color": "#07070a",
+  "theme_color": "#07070a",
+  "icons": [{"src":"/pulse/__grok/icon-180.png","sizes":"180x180","type":"image/png"}]
+}
