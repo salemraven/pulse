@@ -200,18 +200,36 @@ export class AudioEngine {
     try {
       this.unlock();
       const raw = await file.arrayBuffer();
-      const ctx = this.ctx;
-      if (!ctx || id !== this.mapGen) return null;
-      const audio = await ctx.decodeAudioData(raw.slice(0));
-      if (id !== this.mapGen) return null;
-      const map = mapTrack(audio);
-      if (id !== this.mapGen) return null;
-      this.trackMap = map;
-      this.bpm = map.bpm;
-      return map;
+      return this.finishScan(id, raw);
     } catch {
       return null;
     }
+  }
+
+  async scanUrl(url: string): Promise<TrackMap | null> {
+    const id = ++this.mapGen;
+    this.trackMap = null;
+    try {
+      this.unlock();
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const raw = await res.arrayBuffer();
+      return this.finishScan(id, raw);
+    } catch {
+      return null;
+    }
+  }
+
+  private async finishScan(id: number, raw: ArrayBuffer): Promise<TrackMap | null> {
+    const ctx = this.ctx;
+    if (!ctx || id !== this.mapGen) return null;
+    const audio = await ctx.decodeAudioData(raw.slice(0));
+    if (id !== this.mapGen) return null;
+    const map = mapTrack(audio);
+    if (id !== this.mapGen) return null;
+    this.trackMap = map;
+    this.bpm = map.bpm;
+    return map;
   }
 
   clearMap() {

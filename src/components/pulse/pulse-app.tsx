@@ -4,12 +4,15 @@ import {
   Minimize2,
   Pause,
   Play,
+  SkipBack,
+  SkipForward,
   Upload,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import { getEngine } from "@/lib/audio/engine";
 import { readId3 } from "@/lib/audio/id3";
+import { LIBRARY } from "@/lib/audio/library";
 import type { CoreStyle, Track, VizMode } from "@/lib/audio/types";
 import { CORE_STYLES, VIZ_MODES } from "@/lib/audio/types";
 import { VisualizerRenderer } from "@/lib/visualizer/renderer";
@@ -67,6 +70,8 @@ export function PulseApp() {
   const chrome = usePulse((s) => s.chrome);
   const mapping = usePulse((s) => s.mapping);
   const mapLabel = usePulse((s) => s.mapLabel);
+  const playlistIndex = usePulse((s) => s.playlistIndex);
+  const playLibraryRef = useRef<(index: number) => void>(() => {});
 
   const bumpChrome = useCallback(() => {
     usePulse.getState().set({ chrome: true });
@@ -148,7 +153,14 @@ export function PulseApp() {
     const audio = engine.element;
     const syncPlay = () => usePulse.getState().set({ playing: engine.isPlaying() });
     const onMeta = () => setDuration(engine.getDuration());
-    const onEnded = () => usePulse.getState().set({ playing: false });
+    const onEnded = () => {
+      const idx = usePulse.getState().playlistIndex;
+      if (idx == null) {
+        usePulse.getState().set({ playing: false });
+        return;
+      }
+      playLibraryRef.current((idx + 1) % LIBRARY.length);
+    };
     const onErr = () =>
       usePulse.getState().set({ error: "Could not play that file. Try another track.", playing: false });
     audio.addEventListener("play", syncPlay);
@@ -235,6 +247,12 @@ export function PulseApp() {
         void toggleFullscreen();
       } else if (e.code === "KeyM") {
         toggleMute();
+      } else if (e.code === "MediaTrackNext" || (e.code === "ArrowRight" && e.shiftKey)) {
+        e.preventDefault();
+        skipBy(1);
+      } else if (e.code === "MediaTrackPrevious" || (e.code === "ArrowLeft" && e.shiftKey)) {
+        e.preventDefault();
+        skipBy(-1);
       } else if (e.code === "ArrowRight") {
         engine.seek(engine.getCurrentTime() + 5);
       } else if (e.code === "ArrowLeft") {
@@ -268,7 +286,15 @@ export function PulseApp() {
       /* filename fallback */
     }
     const next: Track = { id: file.name, title, artist, artworkUrl, source: "file" };
-    usePulse.getState().set({ track: next, error: null, playing: true, chrome: true, mapping: true, mapLabel: "" });
+    usePulse.getState().set({
+      track: next,
+      error: null,
+      playing: true,
+      chrome: true,
+      mapping: true,
+      mapLabel: "",
+      playlistIndex: null,
+    });
     vizRef.current?.setTrack(title, artist);
     dancerRef.current?.setMap({ bpm: 128, duration: 0, cues: [], drops: 0, beats: [], confidence: 0 });
     try {
@@ -292,6 +318,60 @@ export function PulseApp() {
     });
   }, []);
 
+  const playLibrary = useCallback(async (index: number) => {
+    const item = LIBRARY[(index + LIBRARY.length) % LIBRARY.length];
+    if (!item) return;
+    const engine = getEngine();
+    engine.unlock();
+    const next: Track = { id: item.id, title: item.title, artist: item.artist, source: "library" };
+    usePulse.getState().set({
+      track: next,
+      playlistIndex: LIBRARY.indexOf(item),
+      error: null,
+      playing: true,
+      chrome: true,
+      mapping: true,
+      mapLabel: "",
+    });
+    vizRef.current?.setTrack(item.title, item.artist);
+    dancerRef.current?.setMap({ bpm: 128, duration: 0, cues: [], drops: 0, beats: [], confidence: 0 });
+    try {
+      await engine.loadUrl(item.url);
+      setDuration(engine.getDuration());
+    } catch {
+      usePulse.getState().set({ error: "Could not play that track.", playing: false, mapping: false });
+      return;
+    }
+    void engine.scanUrl(item.url).then((map) => {
+      if (usePulse.getState().track?.id !== item.id) return;
+      if (map) {
+        dancerRef.current?.setMap(map);
+        usePulse.getState().set({
+          mapping: false,
+          mapLabel: `${Math.round(map.bpm)} BPM · ${map.beats.length} beats · ${map.drops} drop${map.drops === 1 ? "" : "s"}`,
+        });
+      } else {
+        usePulse.getState().set({ mapping: false, mapLabel: "" });
+      }
+    });
+  }, []);
+
+  playLibraryRef.current = (index: number) => {
+    void playLibrary(index);
+  };
+
+  const skipBy = useCallback(
+    (delta: number) => {
+      const idx = usePulse.getState().playlistIndex;
+      if (idx == null) {
+        void playLibrary(delta > 0 ? 0 : LIBRARY.length - 1);
+        return;
+      }
+      void playLibrary(idx + delta);
+    },
+    [playLibrary],
+  );
+
   const playDemo = useCallback(() => {
     const engine = getEngine();
     engine.unlock();
@@ -304,6 +384,7 @@ export function PulseApp() {
       chrome: true,
       mapping: false,
       mapLabel: "128 BPM · house loop",
+      playlistIndex: null,
     });
     vizRef.current?.setTrack(DEMO_TRACK.title, DEMO_TRACK.artist);
     setDuration(0);
@@ -338,7 +419,7 @@ export function PulseApp() {
   const togglePlay = useCallback(() => {
     const engine = engineRef.current ?? getEngine();
     if (!usePulse.getState().track) {
-      playDemo();
+      void playLibrary(0);
       return;
     }
     engine.unlock();
@@ -349,7 +430,7 @@ export function PulseApp() {
       engine.play();
       usePulse.getState().set({ playing: true });
     }
-  }, [playDemo]);
+  }, [playLibrary]);
 
   const toggleMute = useCallback(() => {
     const engine = engineRef.current ?? getEngine();
@@ -505,12 +586,16 @@ export function PulseApp() {
               Drop a track. Watch the room move.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted">
-              Drag in an MP3 or a JPG. The picture sits behind the dancer; the room still follows the drop.
+              Play the ravenbloodrain set, drop your own MP3, or use the house loop.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-              <Button onClick={playDemo} className="h-12 rounded-lg px-5">
+              <Button onClick={() => void playLibrary(0)} className="h-12 rounded-lg px-5">
                 <Play className="size-4 translate-x-px" />
-                Play house loop
+                Play library
+              </Button>
+              <Button variant="outline" className="h-12 rounded-lg px-5" onClick={playDemo}>
+                <Play className="size-4 translate-x-px" />
+                House loop
               </Button>
               <Button
                 variant="outline"
@@ -557,10 +642,36 @@ export function PulseApp() {
                 {track?.source === "demo" ? " · generated loop" : mapping ? " · mapping drops…" : mapLabel ? ` · ${mapLabel}` : ""}
               </p>
             </div>
-            <Button variant="ghost" size="icon" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
-              {playing ? <Pause className="size-5" /> : <Play className="size-5 translate-x-px" />}
-            </Button>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={() => skipBy(-1)} aria-label="Previous track">
+                <SkipBack className="size-5" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+                {playing ? <Pause className="size-5" /> : <Play className="size-5 translate-x-px" />}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => skipBy(1)} aria-label="Next track">
+                <SkipForward className="size-5" />
+              </Button>
+            </div>
           </div>
+
+          {playlistIndex != null ? (
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+              {LIBRARY.map((item, i) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void playLibrary(i)}
+                  className={cn(
+                    "h-9 shrink-0 rounded-full px-3 text-xs font-medium transition-colors duration-150",
+                    i === playlistIndex ? "bg-accent text-accent-fg" : "text-muted hover:bg-surface-2 hover:text-fg",
+                  )}
+                >
+                  {item.title}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-3">
             <span ref={timeLabelRef} className="w-10 font-mono text-xs text-muted tabular-nums">

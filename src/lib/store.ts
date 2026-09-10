@@ -13,6 +13,7 @@ type PulseState = {
   chrome: boolean;
   mapping: boolean;
   mapLabel: string;
+  playlistIndex: number | null;
   set: (partial: Partial<PulseState>) => void;
 };
 
@@ -28,6 +29,7 @@ export const usePulse = create<PulseState>((set) => ({
   chrome: true,
   mapping: false,
   mapLabel: "",
+  playlistIndex: null,
   set: (partial) => {
     if (typeof window !== "undefined") {
       try {

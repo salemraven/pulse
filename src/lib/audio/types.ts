@@ -16,7 +16,7 @@ export const CORE_STYLES: { id: CoreStyle; label: string }[] = [
   { id: "dancer", label: "Michelle" },
 ];
 
-export type TrackSource = "file" | "demo";
+export type TrackSource = "file" | "demo" | "library";
 
 export type Track = {
   id: string;
